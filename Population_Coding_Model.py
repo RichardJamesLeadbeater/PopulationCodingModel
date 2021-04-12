@@ -39,12 +39,11 @@ class Stimuli:
         elif distribution == 'rand':
             self.stim_vals = np.random.uniform(min_val, max_val, n_stim)
 
-        self.stim_idx =
         # self.stim_vals = np.random.choice(self.stim_tiling, n_stim)
         # _, self.min_idx = find_nearest(tiling, min_val)
         # _, self.max_idx = find_nearest(tiling, max_val)
         # self.stim_tiling = tiling[self.min_idx: self.max_idx + 1]  # index into feature space for stimuli range
-
+# todo get indices for each stim val
 
 # define params for tiling of feature space
 feature_space = Tiling(min_val=-90, max_val=90, stepsize=0.05)
