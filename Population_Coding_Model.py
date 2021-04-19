@@ -3,7 +3,7 @@
 #
 # Important:
 # Feature space extended from (-90:+90) to (-180:+180) for a moving prefs window which provides circular tuning;
-# ...stimuli are only presented within (-90:+90) range
+# ...MyStimuli are only presented within (-90:+90) range
 # Preferences for each trial only contain values within a 180 degree range;
 # ...these values change depending upon the stimulus value;
 # ...e.g. if stimulus value == -45, the preferences used will be (-135:135)
@@ -41,7 +41,7 @@ class Tiling:
 
 
 class Stimuli:
-    """values of stimuli across feature space"""
+    """values of MyStimuli across feature space"""
 
     def __init__(self, n_stim, min_val, max_val, tiling, distribution='rand'):
         self.n_stim = n_stim
@@ -63,12 +63,28 @@ class Stimuli:
 class NeuralPopulation:
     """params and sampling for neural population with independent properties"""
 
-    def __init__(self, boundaries, sampling_freq, tuning_bandwidth=10, max_firing=60, spontaneous_firing=0.05):
+    def __init__(self, name, boundaries, sampling_freq, tuning_bandwidth=10, max_firing=60, spontaneous_firing=0.05):
+        self.prefs = None
+        self.name = name
         self.boundaries = boundaries  # [min, max]
         self.sampling_freq = sampling_freq  # degrees per neuron
         self.tuning_sigma = tuning_bandwidth  # sigma of gaussian tuning
         self.max_firing = max_firing
         self.spontaneous_firing = spontaneous_firing
+
+    def generate_prefs(self):
+        # produce vector of orientation preferences for each neuron in population
+        # adjust sampling rate to find nearest whole number of nNrns
+
+        n_neurons = abs(self.boundaries[0] - self.boundaries[1]) / self.sampling_freq
+        n_neurons = int(np.round(n_neurons, 0))  # round to nearest possible n_neurons for desired sampling rate
+        prefs = np.linspace(self.boundaries[0], self.boundaries[1], n_neurons)
+        adjusted_freq = abs(self.boundaries[0] - self.boundaries[1] / (len(prefs) - 1))
+
+        self.prefs = prefs
+        self.sampling_freq = adjusted_freq
+
+        return prefs, adjusted_freq
 
     def gen_tunings(self, prefs, sigma):
         """pass in prefs and generate tuning"""
@@ -76,7 +92,9 @@ class NeuralPopulation:
 
 
 # todo calculate prefs from boundaries and sampling frequency
-# todo prefs as nearest vals in tiling
+# get_prefs input: adj_bounds, sampling_freq..  output: prefs, adj_sampling_freq
+# todo conversion of prefs to nearest val in tiling
+# todo rollingWindow
 
 
 def adjust_adjacents(value_list, operation='mean'):
@@ -101,26 +119,6 @@ def adjust_adjacents(value_list, operation='mean'):
     return avgs
 
 
-vertical = NeuralPopulation(boundaries=[-67.5, 67.5], sampling_freq=1, tuning_bandwidth=10,
-                            spontaneous_firing=0.05, max_firing=60)
-
-right_oblique = NeuralPopulation(boundaries=[22.5, 67.5], sampling_freq=8, tuning_bandwidth=15,
-                                 spontaneous_firing=0.05, max_firing=50)
-
-horizontal = NeuralPopulation(boundaries=[-22.5, 22.5], sampling_freq=5, tuning_bandwidth=10,
-                              spontaneous_firing=0.05, max_firing=60)
-
-left_oblique = NeuralPopulation(boundaries=[-67.5, -22.5], sampling_freq=3, tuning_bandwidth=15,
-                                spontaneous_firing=0.05, max_firing=50)
-
-# todo outside of class adjust boundaries based on relative sampling frequencies
-# calculate average sampling rate for transition between neighbouring populations
-# calculate avg_neighbour input sampling rates for each neural pop
-
-freq_avgs = adjust_adjacents(value_list=[vertical.sampling_freq, right_oblique.sampling_freq,
-                                         horizontal.sampling_freq, left_oblique.sampling_freq])
-
-
 # input bounds for each ori, and frequency averages for each ori
 def adjust_boundaries(boundaries, adjuster_values):
     # adjust boundaries to smoothly switch between different sampling rates
@@ -135,20 +133,42 @@ def adjust_boundaries(boundaries, adjuster_values):
     return adjusted_bounds
 
 
-bounds_adjusted = adjust_boundaries(boundaries=[vertical.boundaries, right_oblique.boundaries,
-                                     horizontal.boundaries, left_oblique.boundaries],
-                         adjuster_values=freq_avgs)
+ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=[-67.5, 67.5], sampling_freq=1, tuning_bandwidth=10,
+                                                spontaneous_firing=0.05, max_firing=60),
 
+                   'right_oblique': NeuralPopulation(name='right_oblique', boundaries=[22.5, 67.5], sampling_freq=8, tuning_bandwidth=15,
+                                                     spontaneous_firing=0.05, max_firing=50),
 
+                   'horizontal': NeuralPopulation(name='horizontal', boundaries=[-22.5, 22.5], sampling_freq=5, tuning_bandwidth=10,
+                                                  spontaneous_firing=0.05, max_firing=60),
+
+                   'left_oblique': NeuralPopulation(name='left_oblique', boundaries=[-67.5, -22.5], sampling_freq=3, tuning_bandwidth=15,
+                                                    spontaneous_firing=0.05, max_firing=50)
+                   }
+
+sampling_freqs = [ori_populations[x].sampling_freq for x in ori_populations]
+
+freq_avgs = adjust_adjacents(value_list=[ori_populations[x].sampling_freq for x in ori_populations])
+
+bounds_adjusted = adjust_boundaries(boundaries=[ori_populations[x].boundaries for x in ori_populations],
+                                    adjuster_values=freq_avgs)
+
+for idx, ori in enumerate(ori_populations):
+    ori_populations[ori].boundaries = bounds_adjusted[idx]
 
 # define params for tiling of feature space
-feature_space = Tiling(min_val=-180, max_val=180, stepsize=0.05)
+FeatureSpace = Tiling(min_val=-180, max_val=180, stepsize=0.05)
 
-# define params for stimuli values within feature space
-stimuli = Stimuli(n_stim=100, min_val=-90, max_val=90 - feature_space.stepsize, tiling=feature_space.tiling,
-                  distribution='rand')
+# define params for MyStimuli values within feature space
+MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
+                    distribution='rand')
+
+for ori in ori_populations:
+    ori_populations[ori].generate_prefs()
 
 print('debug')
+
+
 
 # each neural population as instance of class
 # boundaries
