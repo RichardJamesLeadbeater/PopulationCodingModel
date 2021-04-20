@@ -76,34 +76,55 @@ class NeuralPopulation:
         self.prefs = None
         self.name = name
         self.boundaries = boundaries  # [min, max]
-        self.sampling_freq = sampling_freq  # degrees per neuron
+        self.sampling_freq = sampling_freq  # degrees per neuron pref
         self.tuning_sigma = tuning_bandwidth  # sigma of gaussian tuning
         self.max_firing = max_firing
         self.spontaneous_firing = spontaneous_firing
 
-    def generate_prefs(self):
+    def generate_prefs(self, min_val, max_val):
         # produce vector of orientation preferences for each neuron in population
         # adjust sampling rate to find nearest whole number of nNrns
 
-        n_neurons = abs(self.boundaries[0] - self.boundaries[1]) / self.sampling_freq
-        n_neurons = int(np.round(n_neurons, 0))  # round to nearest possible n_neurons for desired sampling rate
-        prefs = np.linspace(self.boundaries[0], self.boundaries[1], n_neurons)
-        adjusted_freq = abs(self.boundaries[0] - self.boundaries[1]) / (len(prefs) - 1)
+        if np.asarray(self.boundaries).ndim == 1:
+            self.boundaries = [self.boundaries]
 
-        self.prefs = prefs
-        self.sampling_freq = adjusted_freq
+        n_bounds = len(self.boundaries)
 
-        return prefs, adjusted_freq
+        prefs = [[]] * n_bounds
+        sampling_freq = [[]] * n_bounds
+
+        if n_bounds == 1:
+            self.boundaries = [self.boundaries]
+
+        for idx, ii in enumerate(self.boundaries):
+            print(idx)
+            n_neurons = abs(ii[0] - ii[1]) / self.sampling_freq
+            n_neurons = int(np.round(n_neurons, 0))  # to nearest whole n_neurons for nearest possible sampling freq
+            prefs[idx] = np.linspace(ii[0], ii[1], n_neurons)
+            sampling_freq[idx] = abs(ii[0] - ii[1]) / (len(prefs[idx]) - 1)
+
+        if n_bounds == 1:
+            prefs = np.asarray(prefs[0])
+        if n_bounds > 1:
+            prefs = np.concatenate([i for i in prefs])
+
+        self.prefs = prefs[(prefs >= min_val) & (prefs < max_val)]  # within tested range
+        self.sampling_freq = sampling_freq
+
+        return prefs, sampling_freq
 
     def gen_tunings(self, prefs, sigma):
         """pass in prefs and generate tuning"""
         pass
 
+# todo conversion of prefs to nearest val in tiling - can be done once prefs vector is joined together
 
-# todo calculate prefs from boundaries and sampling frequency
-# get_prefs input: adj_bounds, sampling_freq..  output: prefs, adj_sampling_freq
-# todo conversion of prefs to nearest val in tiling
-# todo rollingWindow
+
+def get_boundaries(mid_values, bound_range):
+    boundaries = [[]] * len(mid_values)
+    for idx, val in enumerate(mid_values):
+        boundaries[idx] = [val-(bound_range/2), val+(bound_range/2)]
+    return boundaries
 
 
 def adjust_adjacents(value_list, operation='mean'):
@@ -131,9 +152,12 @@ def adjust_adjacents(value_list, operation='mean'):
 # input bounds for each ori, and frequency averages for each ori
 def adjust_boundaries(boundaries, adjuster_values):
     # adjust boundaries to smoothly switch between different sampling rates
-    bounds = np.asarray(boundaries)
+
+    for idx in range(len(boundaries)):
+        boundaries[idx] = np.asarray(boundaries[idx])
+
     adjuster_values = np.asarray(adjuster_values)
-    adjusted_bounds = [[]] * len(bounds)
+    adjusted_bounds = [[]] * len(boundaries)
 
     for idx, ii in enumerate(boundaries):  # loop through each ori bounds
         adjuster = adjuster_values[idx]
@@ -142,16 +166,20 @@ def adjust_boundaries(boundaries, adjuster_values):
     return adjusted_bounds
 
 
-ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=[-67.5, 67.5], sampling_freq=1, tuning_bandwidth=10,
+ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=get_boundaries([-90, 90], 45),
+                                                sampling_freq=1, tuning_bandwidth=10,
                                                 spontaneous_firing=0.05, max_firing=60),
 
-                   'right_oblique': NeuralPopulation(name='right_oblique', boundaries=[22.5, 67.5], sampling_freq=4, tuning_bandwidth=15,
+                   'right_oblique': NeuralPopulation(name='right_oblique', boundaries=get_boundaries([-45, 135], 45),
+                                                     sampling_freq=4, tuning_bandwidth=15,
                                                      spontaneous_firing=0.05, max_firing=50),
 
-                   'horizontal': NeuralPopulation(name='horizontal', boundaries=[-22.5, 22.5], sampling_freq=1, tuning_bandwidth=10,
+                   'horizontal': NeuralPopulation(name='horizontal', boundaries=get_boundaries([-180, 0, 180], 45),
+                                                  sampling_freq=1, tuning_bandwidth=10,
                                                   spontaneous_firing=0.05, max_firing=60),
 
-                   'left_oblique': NeuralPopulation(name='left_oblique', boundaries=[-67.5, -22.5], sampling_freq=4, tuning_bandwidth=15,
+                   'left_oblique': NeuralPopulation(name='left_oblique', boundaries=get_boundaries([-135, 45], 45),
+                                                    sampling_freq=4, tuning_bandwidth=15,
                                                     spontaneous_firing=0.05, max_firing=50)
                    }
 
@@ -169,22 +197,22 @@ for idx, ori in enumerate(ori_populations):
 FeatureSpace = Tiling(min_val=-180, max_val=180, stepsize=0.05)
 
 # define params for MyStimuli values within feature space
-MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
+MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90-FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
                     distribution='rand')
 
 # generate preferences for each orientation
 for ori in ori_populations:
-    ori_populations[ori].generate_prefs()
+    ori_populations[ori].generate_prefs(min_val=FeatureSpace.min_val,
+                                        max_val=FeatureSpace.max_val)
 
-
+# all_prefs = np.sort(np.concatenate([ori_populations[x].prefs for x in ori_populations]))
 
 print('debug')
 
-# todo fix vertical generate_prefs
-# ... v.bounds = [[-112.5, -67.5], [67.5, 112.5]]
-# ... loop through to generate prefs
-# ... with adjust bounds loop you know the lower bound adjustment and the upper bound adjustment
-# ... so just use the lower and upper adjustments equally on each bound  - see notes
+# todo gen_tunings function (outside of class) use boundaries to define sigma vals
+# e.g. for each pref loop through ori_populations to find appropriate boundary (long-winded)
+#   or create gaussian tunings within NeuralPopulation then piece together (issue with indexing)
+#   if you know index of each preference then piecing together is no issue
 
 # each neural population as instance of class
 # boundaries
