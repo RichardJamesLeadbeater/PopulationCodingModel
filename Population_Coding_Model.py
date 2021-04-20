@@ -11,6 +11,7 @@
 
 
 import numpy as np
+from scipy.linalg import hankel
 
 
 def find_nearest(array, values):  # nearest value and index in array for each value
@@ -20,6 +21,14 @@ def find_nearest(array, values):  # nearest value and index in array for each va
         nearest_idx[idx] = (np.abs(array - ii)).argmin()
         nearest_values[idx] = array[nearest_idx[idx]]
     return nearest_values, nearest_idx
+
+
+def rolling_window(vector, window):
+    # create rolling window across vector
+    m = len(vector) - len(window)
+    windows_idxs = hankel(np.arange(0, m + 1), np.arange(m, len(vector)))
+    windows_vals = vector[windows_idxs]
+    return windows_idxs, windows_vals
 
 
 class Params:
@@ -79,7 +88,7 @@ class NeuralPopulation:
         n_neurons = abs(self.boundaries[0] - self.boundaries[1]) / self.sampling_freq
         n_neurons = int(np.round(n_neurons, 0))  # round to nearest possible n_neurons for desired sampling rate
         prefs = np.linspace(self.boundaries[0], self.boundaries[1], n_neurons)
-        adjusted_freq = abs(self.boundaries[0] - self.boundaries[1] / (len(prefs) - 1))
+        adjusted_freq = abs(self.boundaries[0] - self.boundaries[1]) / (len(prefs) - 1)
 
         self.prefs = prefs
         self.sampling_freq = adjusted_freq
@@ -136,13 +145,13 @@ def adjust_boundaries(boundaries, adjuster_values):
 ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=[-67.5, 67.5], sampling_freq=1, tuning_bandwidth=10,
                                                 spontaneous_firing=0.05, max_firing=60),
 
-                   'right_oblique': NeuralPopulation(name='right_oblique', boundaries=[22.5, 67.5], sampling_freq=8, tuning_bandwidth=15,
+                   'right_oblique': NeuralPopulation(name='right_oblique', boundaries=[22.5, 67.5], sampling_freq=4, tuning_bandwidth=15,
                                                      spontaneous_firing=0.05, max_firing=50),
 
-                   'horizontal': NeuralPopulation(name='horizontal', boundaries=[-22.5, 22.5], sampling_freq=5, tuning_bandwidth=10,
+                   'horizontal': NeuralPopulation(name='horizontal', boundaries=[-22.5, 22.5], sampling_freq=1, tuning_bandwidth=10,
                                                   spontaneous_firing=0.05, max_firing=60),
 
-                   'left_oblique': NeuralPopulation(name='left_oblique', boundaries=[-67.5, -22.5], sampling_freq=3, tuning_bandwidth=15,
+                   'left_oblique': NeuralPopulation(name='left_oblique', boundaries=[-67.5, -22.5], sampling_freq=4, tuning_bandwidth=15,
                                                     spontaneous_firing=0.05, max_firing=50)
                    }
 
@@ -163,12 +172,19 @@ FeatureSpace = Tiling(min_val=-180, max_val=180, stepsize=0.05)
 MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
                     distribution='rand')
 
+# generate preferences for each orientation
 for ori in ori_populations:
     ori_populations[ori].generate_prefs()
 
+
+
 print('debug')
 
-
+# todo fix vertical generate_prefs
+# ... v.bounds = [[-112.5, -67.5], [67.5, 112.5]]
+# ... loop through to generate prefs
+# ... with adjust bounds loop you know the lower bound adjustment and the upper bound adjustment
+# ... so just use the lower and upper adjustments equally on each bound  - see notes
 
 # each neural population as instance of class
 # boundaries
