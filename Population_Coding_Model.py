@@ -74,6 +74,7 @@ class NeuralPopulation:
 
     def __init__(self, name, boundaries, sampling_freq, tuning_bandwidth=10, max_firing=60, spontaneous_firing=0.05):
         self.prefs = None
+        self.prefs_idx = None
         self.name = name
         self.boundaries = boundaries  # [min, max]
         self.sampling_freq = sampling_freq  # degrees per neuron pref
@@ -81,37 +82,37 @@ class NeuralPopulation:
         self.max_firing = max_firing
         self.spontaneous_firing = spontaneous_firing
 
-    def generate_prefs(self, min_val, max_val):
-        # produce vector of orientation preferences for each neuron in population
-        # adjust sampling rate to find nearest whole number of nNrns
+    def generate_prefs(self, tiling):
+        #  in: self.boundaries, self.sampling_freq, min_val, max_val, tiling
+        # fun: adjust sampling rate to nearest possible
+        #      generate prefs and round to nearest value in tiling
+        #      get idx of each pref in tiling
+        # out: prefs, prefs_idx, sampling_freq for each neuron from bounds and sampling freq
 
-        if np.asarray(self.boundaries).ndim == 1:
+        # if 1D array then put boundaries into list
+        if np.asarray(self.boundaries).ndim == 1:  # if one set of boundaries put in list for compatibility
             self.boundaries = [self.boundaries]
-
         n_bounds = len(self.boundaries)
-
         prefs = [[]] * n_bounds
         sampling_freq = [[]] * n_bounds
 
-        if n_bounds == 1:
-            self.boundaries = [self.boundaries]
-
         for idx, ii in enumerate(self.boundaries):
-            print(idx)
             n_neurons = abs(ii[0] - ii[1]) / self.sampling_freq
             n_neurons = int(np.round(n_neurons, 0))  # to nearest whole n_neurons for nearest possible sampling freq
             prefs[idx] = np.linspace(ii[0], ii[1], n_neurons)
             sampling_freq[idx] = abs(ii[0] - ii[1]) / (len(prefs[idx]) - 1)
-
+        self.sampling_freq = sampling_freq  # assign to attribute
+        # prefs into 1D numpy array
         if n_bounds == 1:
             prefs = np.asarray(prefs[0])
         if n_bounds > 1:
             prefs = np.concatenate([i for i in prefs])
+        # only prefs within range of tiling (e.g. -180 to 180)
+        prefs = prefs[(prefs >= tiling.min()) & (prefs <= tiling.max())]
+        # round each pref to nearest value in tiling and get its index
+        self.prefs, self.prefs_idx = find_nearest(tiling, prefs)
 
-        self.prefs = prefs[(prefs >= min_val) & (prefs < max_val)]  # within tested range
-        self.sampling_freq = sampling_freq
-
-        return prefs, sampling_freq
+        return self.prefs, self.prefs_idx, self.sampling_freq
 
     def gen_tunings(self, prefs, sigma):
         """pass in prefs and generate tuning"""
@@ -202,8 +203,7 @@ MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90-FeatureSpace.stepsize, t
 
 # generate preferences for each orientation
 for ori in ori_populations:
-    ori_populations[ori].generate_prefs(min_val=FeatureSpace.min_val,
-                                        max_val=FeatureSpace.max_val)
+    ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)
 
 # all_prefs = np.sort(np.concatenate([ori_populations[x].prefs for x in ori_populations]))
 
