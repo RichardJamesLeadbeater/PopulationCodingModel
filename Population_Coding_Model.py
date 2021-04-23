@@ -133,13 +133,14 @@ class NeuralPopulation:
         self.tunings = tunings
         return self.tunings
 
+
 # todo conversion of prefs to nearest val in tiling - can be done once prefs vector is joined together
 
 
 def get_boundaries(mid_values, bound_range):
     boundaries = [[]] * len(mid_values)
     for idx, val in enumerate(mid_values):
-        boundaries[idx] = [val-(bound_range/2), val+(bound_range/2)]
+        boundaries[idx] = [val - (bound_range / 2), val + (bound_range / 2)]
     return boundaries
 
 
@@ -213,16 +214,14 @@ for idx, ori in enumerate(ori_populations):
 FeatureSpace = Tiling(min_val=-180, max_val=180, stepsize=0.05)
 
 # define params for MyStimuli values within feature space
-MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90-FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
+MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
                     distribution='rand')
 
 PopulationResponse = Params()
 PopulationResponse.prefs = np.asarray([])
-# all_prefs = np.asarray([])
 PopulationResponse.prefs_idx = np.asarray([])
-# all_prefs_idx = np.asarray([])
 PopulationResponse.tunings = []
-# all_tunings = []
+# concatenate prefs, prefs_idx, tunings in the same order (can only sort if we can sort tunings in the same pattern)
 for idx, ori in enumerate(ori_populations):
     ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)  # prefs for each ori
     ori_populations[ori].generate_tunings(tiling=FeatureSpace.tiling)  # tunings for each ori
@@ -232,33 +231,21 @@ for idx, ori in enumerate(ori_populations):
     PopulationResponse.tunings.append(ori_populations[ori].tunings)  # rows=prefs, cols=tiling, vals=tuned_response
 
 PopulationResponse.tunings = np.vstack([i for i in PopulationResponse.tunings])
+
+
+def sort_by_standard(standard, *args):
+    inds = standard.argsort()  # gets indices of sorted standard
+    sorted_arrays = [standard[inds[::1]]]  # create list with first element as sorted standard
+    for arg in args:
+        sorted_arrays.append(arg[inds[::1]])  # append arrays sorted to inds of standard
+    # sorted in ascending numerical order [::1]
+    return sorted_arrays
+
+sorted_arrays = sort_by_standard(PopulationResponse.prefs, PopulationResponse.prefs_idx, PopulationResponse.tunings)
+PopulationResponse.prefs = sorted_arrays[0]
+PopulationResponse.prefs_idx = sorted_arrays[1]
+PopulationResponse.tunings = sorted_arrays[2]
 print('debug')
-
-# todo gen_tunings function (outside of class) use boundaries to define sigma vals
-# e.g. for each pref loop through ori_populations to find appropriate boundary (long-winded)
-#   or create gaussian tunings within NeuralPopulation then piece together (issue with indexing)
-#   if you know index of each preference then piecing together is no issue
-
-# each neural population as instance of class
-# boundaries
-# bandwidth
-# sampling frequency
-# max firing rate
-# preferences
-# genTunings()
-
-# todo extend preferences to repeat across feature space
-# ext_prefs = np.asarray(list(prefs-180) + list(prefs) + list(prefs+180))
-# ext_prefs[(ext_prefs > -180) & (ext_prefs < 180)]
-
-# define params for tuning of neural populations
-
-# define params for response of neural populations
-
-
-# adjust boundaries of each population based on sampling frequencies
-
-# piece together tuningArrays and prefVectors from each population into allPops
 
 # generate response for allPops from stim_vals
 
