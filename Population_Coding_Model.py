@@ -1,5 +1,5 @@
 #
-# Population Coding Model
+# PopulationResponse Coding Model
 #
 # Important:
 # Feature space extended from (-90:+90) to (-180:+180) for a moving prefs window which provides circular tuning;
@@ -33,7 +33,7 @@ def rolling_window(vector, window):
 
 def generate_gaussian(x, mu, sigma):
     # gaussian tunings for multiple prefs (mu) & single halfwidth (sigma)
-    x = np.asarray([mu]).transpose()  # formatting so we can broadcast together with x
+    mu = np.asarray([mu]).transpose()  # formatting so we can broadcast together with x
     p1 = -.5 * (((x - mu) / sigma) ** 2)
     p2 = sigma * np.sqrt(2 * np.pi)
     tunings = np.exp(p1) / p2
@@ -126,10 +126,10 @@ class NeuralPopulation:
 
     def generate_tunings(self, tiling):
         """pass in prefs and generate tuning"""
-        x = tiling * np.ones([len(self.prefs), 1])
-        tunings = generate_gaussian(x, self.prefs, self.sigma)
+        repeated_tiling = tiling * np.ones([len(self.prefs), 1])
+        tunings = generate_gaussian(repeated_tiling, self.prefs, self.sigma)
         tunings = tunings / tunings.max()  # normalise to 1
-        tunings = tunings * self.rmax + self.spont  # normalise to rmax then + spont firing
+        tunings = tunings * self.rmax + (self.spont * self.rmax)  # normalise to rmax then + spont firing
         self.tunings = tunings
         return self.tunings
 
@@ -187,16 +187,16 @@ ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=get_
                                                 spont=0.05, rmax=60),
 
                    'right_oblique': NeuralPopulation(name='right_oblique', boundaries=get_boundaries([-45, 135], 45),
-                                                     sampling_freq=4, sigma=15,
-                                                     spont=0.05, rmax=50),
+                                                     sampling_freq=1, sigma=10,
+                                                     spont=0.05, rmax=60),
 
                    'horizontal': NeuralPopulation(name='horizontal', boundaries=get_boundaries([-180, 0, 180], 45),
                                                   sampling_freq=1, sigma=10,
                                                   spont=0.05, rmax=60),
 
                    'left_oblique': NeuralPopulation(name='left_oblique', boundaries=get_boundaries([-135, 45], 45),
-                                                    sampling_freq=4, sigma=15,
-                                                    spont=0.05, rmax=50)
+                                                    sampling_freq=1, sigma=10,
+                                                    spont=0.05, rmax=60)
                    }
 
 sampling_freqs = [ori_populations[x].sampling_freq for x in ori_populations]
@@ -216,12 +216,22 @@ FeatureSpace = Tiling(min_val=-180, max_val=180, stepsize=0.05)
 MyStimuli = Stimuli(n_stim=100, min_val=-90, max_val=90-FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
                     distribution='rand')
 
-# generate preferences for each orientation
-for ori in ori_populations:
-    ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)
+PopulationResponse = Params()
+PopulationResponse.prefs = np.asarray([])
+# all_prefs = np.asarray([])
+PopulationResponse.prefs_idx = np.asarray([])
+# all_prefs_idx = np.asarray([])
+PopulationResponse.tunings = []
+# all_tunings = []
+for idx, ori in enumerate(ori_populations):
+    ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)  # prefs for each ori
+    ori_populations[ori].generate_tunings(tiling=FeatureSpace.tiling)  # tunings for each ori
 
-# all_prefs = np.sort(np.concatenate([ori_populations[x].prefs for x in ori_populations]))
-ori_populations['vertical'].generate_tunings(FeatureSpace.tiling)
+    PopulationResponse.prefs = np.hstack([PopulationResponse.prefs, ori_populations[ori].prefs])  # all prefs
+    PopulationResponse.prefs_idx = np.hstack([PopulationResponse.prefs_idx, ori_populations[ori].prefs_idx])  # all idx
+    PopulationResponse.tunings.append(ori_populations[ori].tunings)  # rows=prefs, cols=tiling, vals=tuned_response
+
+PopulationResponse.tunings = np.vstack([i for i in PopulationResponse.tunings])
 print('debug')
 
 # todo gen_tunings function (outside of class) use boundaries to define sigma vals
