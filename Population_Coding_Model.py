@@ -31,6 +31,15 @@ def rolling_window(vector, window):
     return windows_idxs, windows_vals
 
 
+def generate_gaussian(x, mu, sigma):
+    # gaussian tunings for multiple prefs (mu) & single halfwidth (sigma)
+    x = np.asarray([mu]).transpose()  # formatting so we can broadcast together with x
+    p1 = -.5 * (((x - mu) / sigma) ** 2)
+    p2 = sigma * np.sqrt(2 * np.pi)
+    tunings = np.exp(p1) / p2
+    return tunings
+
+
 class Params:
     """attribute store"""
 
@@ -72,15 +81,16 @@ class Stimuli:
 class NeuralPopulation:
     """params and sampling for neural population with independent properties"""
 
-    def __init__(self, name, boundaries, sampling_freq, tuning_bandwidth=10, max_firing=60, spontaneous_firing=0.05):
+    def __init__(self, name, boundaries, sampling_freq, sigma=10, rmax=60, spont=0.05):
+        self.tunings = None
         self.prefs = None
         self.prefs_idx = None
         self.name = name
         self.boundaries = boundaries  # [min, max]
         self.sampling_freq = sampling_freq  # degrees per neuron pref
-        self.tuning_sigma = tuning_bandwidth  # sigma of gaussian tuning
-        self.max_firing = max_firing
-        self.spontaneous_firing = spontaneous_firing
+        self.sigma = sigma  # sigma of gaussian tuning
+        self.rmax = rmax
+        self.spont = spont
 
     def generate_prefs(self, tiling):
         #  in: self.boundaries, self.sampling_freq, min_val, max_val, tiling
@@ -114,9 +124,14 @@ class NeuralPopulation:
 
         return self.prefs, self.prefs_idx, self.sampling_freq
 
-    def gen_tunings(self, prefs, sigma):
+    def generate_tunings(self, tiling):
         """pass in prefs and generate tuning"""
-        pass
+        x = tiling * np.ones([len(self.prefs), 1])
+        tunings = generate_gaussian(x, self.prefs, self.sigma)
+        tunings = tunings / tunings.max()  # normalise to 1
+        tunings = tunings * self.rmax + self.spont  # normalise to rmax then + spont firing
+        self.tunings = tunings
+        return self.tunings
 
 # todo conversion of prefs to nearest val in tiling - can be done once prefs vector is joined together
 
@@ -168,20 +183,20 @@ def adjust_boundaries(boundaries, adjuster_values):
 
 
 ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=get_boundaries([-90, 90], 45),
-                                                sampling_freq=1, tuning_bandwidth=10,
-                                                spontaneous_firing=0.05, max_firing=60),
+                                                sampling_freq=1, sigma=10,
+                                                spont=0.05, rmax=60),
 
                    'right_oblique': NeuralPopulation(name='right_oblique', boundaries=get_boundaries([-45, 135], 45),
-                                                     sampling_freq=4, tuning_bandwidth=15,
-                                                     spontaneous_firing=0.05, max_firing=50),
+                                                     sampling_freq=4, sigma=15,
+                                                     spont=0.05, rmax=50),
 
                    'horizontal': NeuralPopulation(name='horizontal', boundaries=get_boundaries([-180, 0, 180], 45),
-                                                  sampling_freq=1, tuning_bandwidth=10,
-                                                  spontaneous_firing=0.05, max_firing=60),
+                                                  sampling_freq=1, sigma=10,
+                                                  spont=0.05, rmax=60),
 
                    'left_oblique': NeuralPopulation(name='left_oblique', boundaries=get_boundaries([-135, 45], 45),
-                                                    sampling_freq=4, tuning_bandwidth=15,
-                                                    spontaneous_firing=0.05, max_firing=50)
+                                                    sampling_freq=4, sigma=15,
+                                                    spont=0.05, rmax=50)
                    }
 
 sampling_freqs = [ori_populations[x].sampling_freq for x in ori_populations]
@@ -206,7 +221,7 @@ for ori in ori_populations:
     ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)
 
 # all_prefs = np.sort(np.concatenate([ori_populations[x].prefs for x in ori_populations]))
-
+ori_populations['vertical'].generate_tunings(FeatureSpace.tiling)
 print('debug')
 
 # todo gen_tunings function (outside of class) use boundaries to define sigma vals
