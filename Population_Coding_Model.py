@@ -232,13 +232,16 @@ class TrialHandler:
         self.stim_vals = stim_vals
         self.resp_noiseless = []
         self.resp_noisy = []
+        self.trial_prefs = []
 
     def run(self):
         resp_noisy = []
         resp_noiseless = []
+        trial_prefs = []
         for idx, stim_val in enumerate(self.stim_vals):
             stim_idx = self.stim_idxs[idx]
-            _, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
+            prefs_window_vals, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
+            trial_prefs.append(prefs_window_vals)  # save trial by trial prefs window for later decoding
             # only use tunings within prefs window for this stim_val
             resp_noiseless.append(PopTuning.tunings[prefs_window_idxs, stim_idx])
             # error checking that stim val is in centre of prefs window
@@ -248,9 +251,18 @@ class TrialHandler:
             resp_noiseless[-1] = np.transpose(resp_noiseless[-1] * np.ones([self.n_trials, 1]))
             # get noisy response for all prefs across all trials
             resp_noisy.append(np.random.poisson(resp_noiseless))
+        self.trial_prefs = trial_prefs
         self.resp_noiseless = resp_noiseless
         self.resp_noisy = resp_noisy
         return resp_noiseless, resp_noisy
+
+
+    def decode(self, response=None, method):
+        if response is None:
+            response = self.resp_noisy
+        for trial_idx, trial_resp in enumerate(range(len(response))):
+
+# todo why is resp_noisy ndim==3
 
 
 cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
@@ -319,6 +331,7 @@ PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim
                            tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
                            prefs_all=PopTuning.all_prefs)
 PopResponse.run()
+
 
 print('hi')
 
