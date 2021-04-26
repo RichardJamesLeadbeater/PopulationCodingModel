@@ -282,6 +282,8 @@ PopTuning.rolling_window(vector=PopTuning.all_prefs,
 # get idx of min and max of pref_window, in all_prefs - index with these values
 # loop through each stimulus:
 TrialHandler = Params()  # todo create trial handler class which can store data from multiple runs
+resp_noiseless = []
+resp_noisy = []
 for idx, stim_val in enumerate(MyStimuli.stim_vals):
     stim_idx = MyStimuli.stim_indices[idx]
     # get pref_window idxs to index into tunings
@@ -289,17 +291,15 @@ for idx, stim_val in enumerate(MyStimuli.stim_vals):
     # only use tunings within prefs window for this stim_val
     i_tunings = PopTuning.tunings[prefs_window_idxs, :]
     # population response to stimulus
-    i_noiseless = i_tunings[:, stim_idx]
-    if i_noiseless.argmax() != 87 and i_noiseless.argmax() != 88:
-        print(f'stim_val not in centre of prefs window - in position {i_noiseless.argmax()}')
-    i_noiseless = np.transpose(i_noiseless * np.ones([MyStimuli.n_reps, 1]))
-    i_noisy = np.random.poisson(i_noiseless)
+    resp_noiseless.append(i_tunings[:, stim_idx])
+    if resp_noiseless[-1].argmax() != 87 and resp_noiseless[-1].argmax() != 88:
+        print(f'stim_val not in centre of prefs window - in position {resp_noiseless[-1].argmax()}')
+    resp_noiseless[-1] = np.transpose(resp_noiseless[-1] * np.ones([MyStimuli.n_reps, 1]))
+    resp_noisy.append(np.random.poisson(resp_noiseless))
 print('hi')
 
-# todo do we take the mean before performing decoding methods?
-#   ...or do we perform same number of trials as a participant would?
-#       ...influence of noise greatly depends on this
-#   ...decoding method on each trial of each stim_val so high nTrials used for accurate measure of the variance
+# todo do we perform same number of trials as a participant would? (i.e. is 1 trial here valid as 1 trial irl)
+#   ...decode each trial of each stim_val; high nTrials used for accurate measure of the variance
 
 #       index tunings within pref_window
 #       calcResponse(tunings, stim.i, ps)
