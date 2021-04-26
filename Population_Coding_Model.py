@@ -38,7 +38,7 @@ def rolling_window(vector, window):
     m = len(vector) - len(window)
     windows_idxs = hankel(np.arange(0, m + 1), np.arange(m, len(vector)))
     windows_vals = vector[windows_idxs]
-    return windows_idxs, windows_vals
+    return windows_vals, windows_idxs
 
 
 def generate_gaussian(x, mu, sigma):
@@ -197,25 +197,24 @@ def adjust_boundaries(boundaries, adjuster_values):
     return adjusted_bounds
 
 
-Cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
-Oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
-
+cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
+oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 
 ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=get_boundaries([-90, 90], 45),
-                                                sampling_freq=Cardinal['sampling_freq'], sigma=Cardinal['sigma'],
-                                                spont=Cardinal['spont'], r_max=Cardinal['r_max']),
+                                                sampling_freq=cardinal['sampling_freq'], sigma=cardinal['sigma'],
+                                                spont=cardinal['spont'], r_max=cardinal['r_max']),
 
                    'right_oblique': NeuralPopulation(name='right_oblique', boundaries=get_boundaries([-45, 135], 45),
-                                                     sampling_freq=Oblique['sampling_freq'], sigma=Oblique['sigma'],
-                                                     spont=Oblique['spont'], r_max=Oblique['r_max']),
+                                                     sampling_freq=oblique['sampling_freq'], sigma=oblique['sigma'],
+                                                     spont=oblique['spont'], r_max=oblique['r_max']),
 
                    'horizontal': NeuralPopulation(name='horizontal', boundaries=get_boundaries([-180, 0, 180], 45),
-                                                  sampling_freq=Cardinal['sampling_freq'], sigma=Cardinal['sigma'],
-                                                  spont=Cardinal['spont'], r_max=Cardinal['r_max']),
+                                                  sampling_freq=cardinal['sampling_freq'], sigma=cardinal['sigma'],
+                                                  spont=cardinal['spont'], r_max=cardinal['r_max']),
 
                    'left_oblique': NeuralPopulation(name='left_oblique', boundaries=get_boundaries([-135, 45], 45),
-                                                    sampling_freq=Oblique['sampling_freq'], sigma=Oblique['sigma'],
-                                                    spont=Oblique['spont'], r_max=Oblique['r_max']),
+                                                    sampling_freq=oblique['sampling_freq'], sigma=oblique['sigma'],
+                                                    spont=oblique['spont'], r_max=oblique['r_max']),
                    }
 
 # adjust boundaries using avg sampling rates of neighbouring populations
@@ -229,7 +228,7 @@ for idx, ori in enumerate(ori_populations):
 # define params for tiling of extended feature space (e.g. ori is from -90 to 90, so have -180 to 180)
 FeatureSpace = Tiling(min_tile=-180, max_tile=180, stepsize=0.05)
 # define params for MyStimuli values within normal feature space (e.g. ori stim = [-90:90]
-MyStimuli = Stimuli(n_stim=100, min_stim=-90, max_stim=90-FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
+MyStimuli = Stimuli(n_stim=100, min_stim=-90, max_stim=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
                     distribution='rand')
 
 PopTuning = PopulationTuning(prefs=np.asarray([]), prefs_idx=np.asarray([]), tunings=[])
@@ -244,11 +243,50 @@ PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])
 # sort prefs_idx and tunings by indices of prefs in ascending order
 (PopTuning.prefs, PopTuning.prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.prefs, PopTuning.prefs_idx,
                                                                              PopTuning.tunings)
-
-print('debug')
-
+# create array of all possible pref windows - switch between dependent on stim_val
+# ensures population vector is equally accurate regardless of stim_val (circular tuning)
+PopTuning.pref_windows, PopTuning.pref_windows_idx = rolling_window(vector=PopTuning.prefs,
+                                                                    window=PopTuning.prefs[(PopTuning.prefs >= -90)
+                                                                                           & (PopTuning.prefs < 90)])
 # generate response for allPops from stim_vals
+# [resp_n, noiseless, shift_prefs, shift_tunings] = genPopResponse(tunings, params);
+# input tunings params
+# output noisy and noiseless response; shifted prefs & tunings for each stim presentation
+print('shift prefs')
 
-# decode allPops responses (WTA, PV, ML)
 
+def shift_prefs(stim_val, all_windows, all_values):
+    # find index of mean(pref_window) closest to stim_val
+    all_windows_median = np.median(all_windows, 1)  # get median (centre) value for each pref window
+    window_idx = abs(stim_val - all_windows_median).argmin()  # get row_idx where median is closest to stim_val
+    # use prefs window which has stim_val at it's centre
+    window_vals = all_windows[window_idx, :]
+    # get range of idxs so we can index tunings array
+    min_idx = abs(all_values - window_vals.min()).argmin()  # start of window
+    max_idx = abs(all_values - window_vals.max()).argmin()  # end of window
+    window_idxs = np.arange(min_idx, max_idx+1)  # all idxs within window
+
+    return window_vals, window_idxs
+
+
+# todo need to index into tunings to only have responses from tunings within pref window
+# get idx of min and max of pref_window, in all_prefs - index with these values
+# loop through each stimulus:
+TrialHandler = Params()  # todo create trial handler class which can store data from multiple runs
+for idx, stim_val in enumerate(MyStimuli.stim_vals):
+    # get pref_window idxs to index into tunings
+    _, prefs_window_idxs = shift_prefs(stim_val, PopTuning.pref_windows, PopTuning.prefs)
+    # only use tunings within prefs window for this stim_val
+    TrialHandler.tunings = PopTuning.tunings[prefs_window_idxs, :]
+    # population response to stimulus
+    print('hi')
+#       index tunings within pref_window
+#       calcResponse(tunings, stim.i, ps)
+
+# def calc_response(tunings, stim_idx, ps):
+#     noiseless = tunings(:, stim_idx)
+#     noiseless = bsxfun(@times, noiseless, ones(1, nTrials))
+#     resp_noisy = random('poisson', noiseless, size(noiseless))
+# # decode allPops responses (WTA, PV, ML)
+#
 print('debug')
