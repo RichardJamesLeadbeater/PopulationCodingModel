@@ -71,12 +71,11 @@ class Tiling:
 class Stimuli:
     """values of MyStimuli across feature space"""
 
-    def __init__(self, n_stim, n_reps, min_stim, max_stim, tiling, distribution='rand'):
+    def __init__(self, n_stim, min_stim, max_stim, tiling, distribution='rand'):
         self.n_stim = n_stim
         self.min_val = min_stim
         self.max_val = max_stim
         self.tiling = tiling
-        self.n_reps = n_reps
 
         self.distribution = distribution
         if distribution == 'unif':  # achieves near-equal spacing of stim_vals
@@ -172,7 +171,7 @@ def shift_prefs(stim_val, all_windows, all_values):
     # get range of idxs so we can index tunings array
     min_idx = abs(all_values - window_vals.min()).argmin()  # start of window
     max_idx = abs(all_values - window_vals.max()).argmin()  # end of window
-    window_idxs = np.arange(min_idx, max_idx+1)  # all idxs within window
+    window_idxs = np.arange(min_idx, max_idx + 1)  # all idxs within window
     return window_vals, window_idxs
 
 
@@ -222,6 +221,38 @@ def adjust_boundaries(boundaries, adjuster_values):
     return adjusted_bounds
 
 
+# todo create trial handler class which can store data from multiple runs
+class TrialHandler:
+    def __init__(self, n_trials, stim_vals, stim_idxs, tunings, prefs_windows, prefs_all):
+        self.n_trials = n_trials
+        self.prefs_windows = prefs_windows
+        self.prefs_all = prefs_all
+        self.tunings = tunings
+        self.stim_idxs = stim_idxs
+        self.stim_vals = stim_vals
+        self.resp_noiseless = []
+        self.resp_noisy = []
+
+    def run(self):
+        resp_noisy = []
+        resp_noiseless = []
+        for idx, stim_val in enumerate(self.stim_vals):
+            stim_idx = self.stim_idxs[idx]
+            _, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
+            # only use tunings within prefs window for this stim_val
+            resp_noiseless.append(PopTuning.tunings[prefs_window_idxs, stim_idx])
+            # error checking that stim val is in centre of prefs window
+            if resp_noiseless[-1].argmax() != 87 and resp_noiseless[-1].argmax() != 88:
+                print(f'stim_val not in centre of prefs window - in position {resp_noiseless[-1].argmax()}')
+            # repeat noiseless response for n_trials
+            resp_noiseless[-1] = np.transpose(resp_noiseless[-1] * np.ones([self.n_trials, 1]))
+            # get noisy response for all prefs across all trials
+            resp_noisy.append(np.random.poisson(resp_noiseless))
+        self.resp_noiseless = resp_noiseless
+        self.resp_noisy = resp_noisy
+        return resp_noiseless, resp_noisy
+
+
 cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 
@@ -253,8 +284,9 @@ for idx, ori in enumerate(ori_populations):
 # define params for tiling of extended feature space (e.g. ori is from -90 to 90, so have -180 to 180)
 FeatureSpace = Tiling(min_tile=-180, max_tile=180, stepsize=0.05)
 # define params for MyStimuli values within normal feature space (e.g. ori stim = [-90:90]
-MyStimuli = Stimuli(n_stim=100, n_reps=100, min_stim=-90, max_stim=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
-                    distribution='rand')
+Stim = Stimuli(n_stim=20, min_stim=-90, max_stim=90 - FeatureSpace.stepsize,
+               tiling=FeatureSpace.tiling,
+               distribution='rand')
 
 PopTuning = PopulationTuning(all_prefs=np.asarray([]), all_prefs_idx=np.asarray([]), tunings=[])
 for idx, ori in enumerate(ori_populations):
@@ -273,41 +305,22 @@ PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])
 # ensures population vector is equally accurate regardless of stim_val (circular tuning)
 PopTuning.rolling_window(vector=PopTuning.all_prefs,
                          window=PopTuning.all_prefs[(PopTuning.all_prefs >= -90) & (PopTuning.all_prefs < 90)])
+
+
 # generate response for allPops from stim_vals
 # [resp_n, noiseless, shift_prefs, shift_tunings] = genPopResponse(tunings, params);
 # input tunings params
-# output noisy and noiseless response; shifted prefs & tunings for each stim presentation
+# output noisy and noiseless response; shifted prefs & tunings for each stim presentat
 
-# todo need to index into tunings to only have responses from tunings within pref window
 # get idx of min and max of pref_window, in all_prefs - index with these values
 # loop through each stimulus:
-TrialHandler = Params()  # todo create trial handler class which can store data from multiple runs
-resp_noiseless = []
-resp_noisy = []
-for idx, stim_val in enumerate(MyStimuli.stim_vals):
-    stim_idx = MyStimuli.stim_indices[idx]
-    # get pref_window idxs to index into tunings
-    _, prefs_window_idxs = shift_prefs(stim_val, PopTuning.window_prefs, PopTuning.all_prefs)
-    # only use tunings within prefs window for this stim_val
-    i_tunings = PopTuning.tunings[prefs_window_idxs, :]
-    # population response to stimulus
-    resp_noiseless.append(i_tunings[:, stim_idx])
-    if resp_noiseless[-1].argmax() != 87 and resp_noiseless[-1].argmax() != 88:
-        print(f'stim_val not in centre of prefs window - in position {resp_noiseless[-1].argmax()}')
-    resp_noiseless[-1] = np.transpose(resp_noiseless[-1] * np.ones([MyStimuli.n_reps, 1]))
-    resp_noisy.append(np.random.poisson(resp_noiseless))
+
+PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim.stim_indices,
+                           tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+                           prefs_all=PopTuning.all_prefs)
+PopResponse.run()
+
 print('hi')
 
-# todo do we perform same number of trials as a participant would? (i.e. is 1 trial here valid as 1 trial irl)
-#   ...decode each trial of each stim_val; high nTrials used for accurate measure of the variance
-
-#       index tunings within pref_window
-#       calcResponse(tunings, stim.i, ps)
-
-# def calc_response(tunings, stim_idx, ps):
-#     noiseless = tunings(:, stim_idx)
-#     noiseless = bsxfun(@times, noiseless, ones(1, nTrials))
-#     resp_noisy = random('poisson', noiseless, size(noiseless))
-# # decode allPops responses (WTA, PV, ML)
-#
+# decode (WTA, PV, ML, ?pooling?)
 print('debug')
