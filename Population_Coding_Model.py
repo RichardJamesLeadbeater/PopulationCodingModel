@@ -71,11 +71,12 @@ class Tiling:
 class Stimuli:
     """values of MyStimuli across feature space"""
 
-    def __init__(self, n_stim, min_stim, max_stim, tiling, distribution='rand'):
+    def __init__(self, n_stim, n_reps, min_stim, max_stim, tiling, distribution='rand'):
         self.n_stim = n_stim
         self.min_val = min_stim
         self.max_val = max_stim
         self.tiling = tiling
+        self.n_reps = n_reps
 
         self.distribution = distribution
         if distribution == 'unif':  # achieves near-equal spacing of stim_vals
@@ -145,10 +146,34 @@ class NeuralPopulation:
 
 
 class PopulationTuning:
-    def __init__(self, prefs, prefs_idx, tunings):
-        self.prefs = prefs
-        self.prefs_idx = prefs_idx
+    def __init__(self, all_prefs=None, all_prefs_idx=None, tunings=None,
+                 window_prefs=None, window_prefs_idx=None):
+        self.all_prefs = all_prefs
+        self.all_prefs_idx = all_prefs_idx
         self.tunings = tunings
+        self.window_prefs = window_prefs
+        self.window_prefs_idx = window_prefs_idx
+
+    def rolling_window(self, vector, window):
+        # create rolling window across vector
+        m = len(vector) - len(window)
+        self.window_prefs_idx = hankel(np.arange(0, m + 1), np.arange(m, len(vector)))
+        self.window_prefs = vector[self.window_prefs_idx]
+        return self.window_prefs, self.window_prefs_idx
+
+
+def shift_prefs(stim_val, all_windows, all_values):
+    # get central value of each prefs window
+    centre_vals = np.mean([all_windows.min(1), all_windows.max(1)], 0)
+    # find index of centre_val(pref_window) closest to stim_val
+    window_idx = abs(centre_vals - stim_val).argmin()  # get row_idx (window) where centre_val is closest to stim_val
+    # use prefs window which has stim_val at it's centre
+    window_vals = all_windows[window_idx, :]
+    # get range of idxs so we can index tunings array
+    min_idx = abs(all_values - window_vals.min()).argmin()  # start of window
+    max_idx = abs(all_values - window_vals.max()).argmin()  # end of window
+    window_idxs = np.arange(min_idx, max_idx+1)  # all idxs within window
+    return window_vals, window_idxs
 
 
 def get_boundaries(mid_values, bound_range):
@@ -228,58 +253,54 @@ for idx, ori in enumerate(ori_populations):
 # define params for tiling of extended feature space (e.g. ori is from -90 to 90, so have -180 to 180)
 FeatureSpace = Tiling(min_tile=-180, max_tile=180, stepsize=0.05)
 # define params for MyStimuli values within normal feature space (e.g. ori stim = [-90:90]
-MyStimuli = Stimuli(n_stim=100, min_stim=-90, max_stim=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
+MyStimuli = Stimuli(n_stim=100, n_reps=100, min_stim=-90, max_stim=90 - FeatureSpace.stepsize, tiling=FeatureSpace.tiling,
                     distribution='rand')
 
-PopTuning = PopulationTuning(prefs=np.asarray([]), prefs_idx=np.asarray([]), tunings=[])
+PopTuning = PopulationTuning(all_prefs=np.asarray([]), all_prefs_idx=np.asarray([]), tunings=[])
 for idx, ori in enumerate(ori_populations):
     ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)  # prefs for each ori
     ori_populations[ori].generate_tunings(tiling=FeatureSpace.tiling)  # tunings for each ori
     # concatenate prefs, prefs_idx, tunings
-    PopTuning.prefs = np.hstack([PopTuning.prefs, ori_populations[ori].prefs])
-    PopTuning.prefs_idx = np.hstack([PopTuning.prefs_idx, ori_populations[ori].prefs_idx])
+    PopTuning.all_prefs = np.hstack([PopTuning.all_prefs, ori_populations[ori].prefs])
+    PopTuning.all_prefs_idx = np.hstack([PopTuning.all_prefs_idx, ori_populations[ori].prefs_idx])
     PopTuning.tunings.append(ori_populations[ori].tunings)  # rows=prefs, cols=tiling, vals=tuned_response
 PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])
 # sort prefs_idx and tunings by indices of prefs in ascending order
-(PopTuning.prefs, PopTuning.prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.prefs, PopTuning.prefs_idx,
-                                                                             PopTuning.tunings)
+(PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,
+                                                                                     PopTuning.all_prefs_idx,
+                                                                                     PopTuning.tunings)
 # create array of all possible pref windows - switch between dependent on stim_val
 # ensures population vector is equally accurate regardless of stim_val (circular tuning)
-PopTuning.pref_windows, PopTuning.pref_windows_idx = rolling_window(vector=PopTuning.prefs,
-                                                                    window=PopTuning.prefs[(PopTuning.prefs >= -90)
-                                                                                           & (PopTuning.prefs < 90)])
+PopTuning.rolling_window(vector=PopTuning.all_prefs,
+                         window=PopTuning.all_prefs[(PopTuning.all_prefs >= -90) & (PopTuning.all_prefs < 90)])
 # generate response for allPops from stim_vals
 # [resp_n, noiseless, shift_prefs, shift_tunings] = genPopResponse(tunings, params);
 # input tunings params
 # output noisy and noiseless response; shifted prefs & tunings for each stim presentation
-print('shift prefs')
-
-
-def shift_prefs(stim_val, all_windows, all_values):
-    # find index of mean(pref_window) closest to stim_val
-    all_windows_median = np.median(all_windows, 1)  # get median (centre) value for each pref window
-    window_idx = abs(stim_val - all_windows_median).argmin()  # get row_idx where median is closest to stim_val
-    # use prefs window which has stim_val at it's centre
-    window_vals = all_windows[window_idx, :]
-    # get range of idxs so we can index tunings array
-    min_idx = abs(all_values - window_vals.min()).argmin()  # start of window
-    max_idx = abs(all_values - window_vals.max()).argmin()  # end of window
-    window_idxs = np.arange(min_idx, max_idx+1)  # all idxs within window
-
-    return window_vals, window_idxs
-
 
 # todo need to index into tunings to only have responses from tunings within pref window
 # get idx of min and max of pref_window, in all_prefs - index with these values
 # loop through each stimulus:
 TrialHandler = Params()  # todo create trial handler class which can store data from multiple runs
 for idx, stim_val in enumerate(MyStimuli.stim_vals):
+    stim_idx = MyStimuli.stim_indices[idx]
     # get pref_window idxs to index into tunings
-    _, prefs_window_idxs = shift_prefs(stim_val, PopTuning.pref_windows, PopTuning.prefs)
+    _, prefs_window_idxs = shift_prefs(stim_val, PopTuning.window_prefs, PopTuning.all_prefs)
     # only use tunings within prefs window for this stim_val
-    TrialHandler.tunings = PopTuning.tunings[prefs_window_idxs, :]
+    i_tunings = PopTuning.tunings[prefs_window_idxs, :]
     # population response to stimulus
-    print('hi')
+    i_noiseless = i_tunings[:, stim_idx]
+    if i_noiseless.argmax() != 87 and i_noiseless.argmax() != 88:
+        print(f'stim_val not in centre of prefs window - in position {i_noiseless.argmax()}')
+    i_noiseless = np.transpose(i_noiseless * np.ones([MyStimuli.n_reps, 1]))
+    i_noisy = np.random.poisson(i_noiseless)
+print('hi')
+
+# todo do we take the mean before performing decoding methods?
+#   ...or do we perform same number of trials as a participant would?
+#       ...influence of noise greatly depends on this
+#   ...decoding method on each trial of each stim_val so high nTrials used for accurate measure of the variance
+
 #       index tunings within pref_window
 #       calcResponse(tunings, stim.i, ps)
 
