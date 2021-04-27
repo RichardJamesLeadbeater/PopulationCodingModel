@@ -375,3 +375,6 @@ test = maxlikelihood(PopResponse.resp_noisy[10], PopResponse.rolling_tunings[10]
 
 # decode (WTA, PV, ML, ?pooling?)
 print('debug')
+
+# todo put decoders into class
+#   - create plots like in MATLAB
