@@ -78,14 +78,17 @@ class Stimuli:
         self.tiling = tiling
 
         self.distribution = distribution
+        stim_vals = None
         if distribution == 'unif':  # achieves near-equal spacing of stim_vals
             stim_freq = abs(min_stim - max_stim) / n_stim
-            self.stim_vals = np.linspace(min_stim, max_stim - stim_freq, n_stim)  # no repeats e.g. -90 and 90
+            stim_vals = np.linspace(min_stim, max_stim - stim_freq, n_stim)  # no repeats e.g. -90 and 90
         elif distribution == 'rand':  # random spacing of stim_vals
-            self.stim_vals = np.random.uniform(min_stim, max_stim, n_stim)
-
+            stim_vals = np.random.uniform(min_stim, max_stim, n_stim)
         # nearest val & idx in array for each given value
-        self.stim_vals, self.stim_indices = find_nearest(tiling, self.stim_vals)
+        stim_vals, stim_indices = find_nearest(tiling, stim_vals)
+
+        self.stim_vals = np.sort(stim_vals)
+        self.stim_indices = np.sort(stim_indices)
 
 
 class NeuralPopulation:
@@ -232,35 +235,41 @@ class TrialHandler:
         self.stim_vals = stim_vals
         self.resp_noiseless = []
         self.resp_noisy = []
-        self.trial_prefs = []
+        self.rolling_prefs = []
+        self.rolling_tunings = []
 
     def run(self):
         resp_noisy = []
         resp_noiseless = []
-        trial_prefs = []
+        rolling_prefs = []
+        rolling_tunings = []
         for idx, stim_val in enumerate(self.stim_vals):
             stim_idx = self.stim_idxs[idx]
             prefs_window_vals, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
-            trial_prefs.append(prefs_window_vals)  # save trial by trial prefs window for later decoding
+            rolling_prefs.append(prefs_window_vals)  # save trial prefs window for later decoding
+            rolling_tunings.append(PopTuning.tunings[prefs_window_idxs, :])  # save trial tunings for max likelihood
+            noiseless = PopTuning.tunings[prefs_window_idxs, stim_idx]
             # only use tunings within prefs window for this stim_val
-            resp_noiseless.append(PopTuning.tunings[prefs_window_idxs, stim_idx])
             # error checking that stim val is in centre of prefs window
-            if resp_noiseless[-1].argmax() != 87 and resp_noiseless[-1].argmax() != 88:
-                print(f'stim_val not in centre of prefs window - in position {resp_noiseless[-1].argmax()}')
+            if noiseless.argmax() != 87 and noiseless.argmax() != 88:
+                print(f'stim_val not in centre of prefs window - in position {noiseless.argmax()}')
             # repeat noiseless response for n_trials
-            resp_noiseless[-1] = np.transpose(resp_noiseless[-1] * np.ones([self.n_trials, 1]))
+            resp_noiseless.append(np.transpose(noiseless * np.ones([self.n_trials, 1])))
             # get noisy response for all prefs across all trials
-            resp_noisy.append(np.random.poisson(resp_noiseless))
-        self.trial_prefs = trial_prefs
+            resp_noisy.append(np.random.poisson(resp_noiseless[-1]))
+
+        self.rolling_prefs = rolling_prefs
+        self.rolling_tunings = rolling_tunings
         self.resp_noiseless = resp_noiseless
         self.resp_noisy = resp_noisy
+
         return resp_noiseless, resp_noisy
 
+    # def decode(self, response=None, method):
+    #     if response is None:
+    #         response = self.resp_noisy
+    #     for trial_idx, trial_resp in enumerate(range(len(response))):
 
-    def decode(self, response=None, method):
-        if response is None:
-            response = self.resp_noisy
-        for trial_idx, trial_resp in enumerate(range(len(response))):
 
 # todo why is resp_noisy ndim==3
 
@@ -318,7 +327,6 @@ PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])
 PopTuning.rolling_window(vector=PopTuning.all_prefs,
                          window=PopTuning.all_prefs[(PopTuning.all_prefs >= -90) & (PopTuning.all_prefs < 90)])
 
-
 # generate response for allPops from stim_vals
 # [resp_n, noiseless, shift_prefs, shift_tunings] = genPopResponse(tunings, params);
 # input tunings params
@@ -333,7 +341,37 @@ PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim
 PopResponse.run()
 
 
-print('hi')
+def wta(pop_resp, trial_prefs):
+    # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+    # trial_prefs: 1D prefs(vals)
+    trial_max = pop_resp.max(0)  # max response for each trial (col)
+    ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial (col)
+    ismax = ismax * np.random.random(size=ismax.shape)  # randomise value of 1s in matrix
+    trial_pref_idx = ismax.argmax(0)  # idx of pref (row) with max response
+    wta_est = trial_prefs[trial_pref_idx]
+    # which pref produced the strongest response each trial
+    return wta_est
+
+
+def popvector(pop_resp, trial_prefs):
+    # pref_mat = trial_prefs * np.ones([len(trial_prefs), 1])
+    trial_prefs = trial_prefs * (np.pi / 180)
+    hori = np.sum((pop_resp.T * np.cos(trial_prefs)).T, 0)
+    vert = np.sum((pop_resp.T * np.sin(trial_prefs)).T, 0)
+    estimate = np.arctan2(vert, hori)  # inverse tangent
+    popvector_est = estimate * (180 / np.pi)
+    return popvector_est
+
+
+def maxlikelihood(pop_resp, tuned_response, tiling):
+    log_tunings = np.log10(tuned_response)
+    log_likelihood = pop_resp.T @ log_tunings  # matrix multiplication; outputs: size=[trials, tiling]
+    max_likelihood_idx = log_likelihood.argmax(1)  # gives idx in feature space of ML est
+    max_likelihood_val = tiling[max_likelihood_idx]
+    return max_likelihood_val
+
+
+test = maxlikelihood(PopResponse.resp_noisy[10], PopResponse.rolling_tunings[10], FeatureSpace.tiling)
 
 # decode (WTA, PV, ML, ?pooling?)
 print('debug')
