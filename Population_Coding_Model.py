@@ -247,8 +247,8 @@ class TrialHandler:
             stim_idx = self.stim_idxs[idx]
             prefs_window_vals, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
             rolling_prefs.append(prefs_window_vals)  # save trial prefs window for later decoding
-            rolling_tunings.append(PopTuning.tunings[prefs_window_idxs, :])  # save trial tunings for max likelihood
-            noiseless = PopTuning.tunings[prefs_window_idxs, stim_idx]
+            rolling_tunings.append(self.tunings[prefs_window_idxs, :])  # save trial tunings for max likelihood
+            noiseless = self.tunings[prefs_window_idxs, stim_idx]
             # only use tunings within prefs window for this stim_val
             # error checking that stim val is in centre of prefs window
             if noiseless.argmax() != 87 and noiseless.argmax() != 88:
@@ -265,10 +265,73 @@ class TrialHandler:
 
         return resp_noiseless, resp_noisy
 
-    # def decode(self, response=None, method):
-    #     if response is None:
-    #         response = self.resp_noisy
-    #     for trial_idx, trial_resp in enumerate(range(len(response))):
+
+class Decoder:
+    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, tiling, decoder):
+        """initialise attributes of parent class"""
+        self.resp_noisy = resp_noisy
+        self.rolling_tunings = rolling_tunings
+        self.rolling_prefs = rolling_prefs
+        self.tiling = tiling
+        self.decoder = decoder
+        self.decoded = {}
+
+    def wta(self, pop_resp=None, trial_prefs=None):
+        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+        # trial_prefs: 1D prefs(vals)
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if trial_prefs is None:
+            trial_prefs = self.rolling_prefs
+        wta_est = []
+        for idx in range(len(pop_resp)):
+            trial_max = pop_resp[idx].max(0)  # max response for each trial (col)
+            ismax = (trial_max == pop_resp[idx]).astype('int')  # bool 01 matrix of max for each trial (col)
+            ismax = ismax * np.random.random(size=ismax.shape)  # randomise value of 1s in matrix
+            trial_pref_idx = ismax.argmax(0)  # idx of pref (row) with max response
+            wta_est.append(trial_prefs[trial_pref_idx])
+            # which pref produced the strongest response each trial
+        self.decoded['wta'] = wta_est
+        return wta_est
+
+    def popvector(self, pop_resp=None, trial_prefs=None):
+        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+        # trial_prefs: 1D prefs(vals)
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if trial_prefs is None:
+            trial_prefs = self.rolling_prefs
+        popvector_est = []
+        for idx in range(len(pop_resp)):
+            trial_resp = pop_resp[idx]
+            trial_prefs = trial_prefs[idx] * (np.pi / 180)  # convert to radians
+            hori = np.sum((trial_resp.T * np.cos(trial_prefs)).T, 0)
+            vert = np.sum((trial_resp.T * np.sin(trial_prefs)).T, 0)
+            popvector_est.append(np.arctan2(vert, hori) * (180 / np.pi))  # inverse tangent in degrees
+        self.decoded['pv'] = popvector_est
+        return popvector_est
+
+    def maxlikelihood(self, pop_resp=None, rolling_tunings=None, tiling=None):
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if rolling_tunings is None:
+            rolling_tunings = self.rolling_tunings
+        if tiling is None:
+            tiling = self.tiling
+        maxlikelihood_est = []
+        for idx, trial_resp in enumerate(pop_resp):
+            log_tunings = np.log10(rolling_tunings[idx])
+            log_likelihood = trial_resp.T @ log_tunings  # matrix multiplication; outputs: size=[trials, tiling]
+            max_likelihood_idx = log_likelihood.argmax(1)  # gives idx in feature space of ML est
+            maxlikelihood_est.append(tiling[max_likelihood_idx])
+        self.decoded['ml'] = maxlikelihood_est
+        return maxlikelihood_est
+
+
+# def decode(self, response=None, method):
+#     if response is None:
+#         response = self.resp_noisy
+#     for trial_idx, trial_resp in enumerate(range(len(response))):
 
 
 # todo why is resp_noisy ndim==3
@@ -339,39 +402,6 @@ PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim
                            tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
                            prefs_all=PopTuning.all_prefs)
 PopResponse.run()
-
-
-def wta(pop_resp, trial_prefs):
-    # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
-    # trial_prefs: 1D prefs(vals)
-    trial_max = pop_resp.max(0)  # max response for each trial (col)
-    ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial (col)
-    ismax = ismax * np.random.random(size=ismax.shape)  # randomise value of 1s in matrix
-    trial_pref_idx = ismax.argmax(0)  # idx of pref (row) with max response
-    wta_est = trial_prefs[trial_pref_idx]
-    # which pref produced the strongest response each trial
-    return wta_est
-
-
-def popvector(pop_resp, trial_prefs):
-    # pref_mat = trial_prefs * np.ones([len(trial_prefs), 1])
-    trial_prefs = trial_prefs * (np.pi / 180)
-    hori = np.sum((pop_resp.T * np.cos(trial_prefs)).T, 0)
-    vert = np.sum((pop_resp.T * np.sin(trial_prefs)).T, 0)
-    estimate = np.arctan2(vert, hori)  # inverse tangent
-    popvector_est = estimate * (180 / np.pi)
-    return popvector_est
-
-
-def maxlikelihood(pop_resp, tuned_response, tiling):
-    log_tunings = np.log10(tuned_response)
-    log_likelihood = pop_resp.T @ log_tunings  # matrix multiplication; outputs: size=[trials, tiling]
-    max_likelihood_idx = log_likelihood.argmax(1)  # gives idx in feature space of ML est
-    max_likelihood_val = tiling[max_likelihood_idx]
-    return max_likelihood_val
-
-
-test = maxlikelihood(PopResponse.resp_noisy[10], PopResponse.rolling_tunings[10], FeatureSpace.tiling)
 
 # decode (WTA, PV, ML, ?pooling?)
 print('debug')
