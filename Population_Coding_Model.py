@@ -267,13 +267,12 @@ class TrialHandler:
 
 
 class Decoder:
-    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, tiling, decoder):
+    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, tiling):
         """initialise attributes of parent class"""
         self.resp_noisy = resp_noisy
         self.rolling_tunings = rolling_tunings
         self.rolling_prefs = rolling_prefs
         self.tiling = tiling
-        self.decoder = decoder
         self.decoded = {}
 
     def wta(self, pop_resp=None, trial_prefs=None):
@@ -403,7 +402,14 @@ PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim
                            prefs_all=PopTuning.all_prefs)
 PopResponse.run()
 
+Decoded = Decoder(resp_noisy=PopResponse.resp_noisy, rolling_tunings=PopResponse.rolling_tunings,
+                  rolling_prefs=PopResponse.rolling_prefs, tiling=FeatureSpace.tiling)
+
 # decode (WTA, PV, ML, ?pooling?)
+Decoded.wta()
+Decoded.popvector()
+Decoded.maxlikelihood()
+
 print('debug')
 
 # todo put decoders into class
