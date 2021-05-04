@@ -207,8 +207,8 @@ def adjust_adjacents(value_list, operation='mean'):
     return avgs
 
 
-# input bounds for each ori, and frequency averages for each ori
 def adjust_boundaries(boundaries, adjuster_values):
+    # input bounds for each ori, and frequency averages for each ori
     # adjust boundaries to smoothly switch between different sampling rates
 
     for idx in range(len(boundaries)):
@@ -266,14 +266,22 @@ class TrialHandler:
         return resp_noiseless, resp_noisy
 
 
+def calc_error(decoded_vals, stim_val):
+    abs_error = np.asarray(abs(decoded_vals - stim_val))
+    mean_abs_error = np.mean(abs_error)
+    return mean_abs_error
+
+
 class Decoder:
-    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, tiling):
+    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, stim_vals, tiling):
         """initialise attributes of parent class"""
-        self.resp_noisy = resp_noisy
-        self.rolling_tunings = rolling_tunings
         self.rolling_prefs = rolling_prefs
+        self.rolling_tunings = rolling_tunings
+        self.resp_noisy = resp_noisy
         self.tiling = tiling
         self.decoded = {}
+        self.stim_vals = stim_vals
+        self.n_stim = len(stim_vals)
 
     def wta(self, pop_resp=None, trial_prefs=None):
         # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
@@ -286,26 +294,25 @@ class Decoder:
         for idx in range(len(pop_resp)):
             trial_max = pop_resp[idx].max(0)  # max response for each trial (col)
             ismax = (trial_max == pop_resp[idx]).astype('int')  # bool 01 matrix of max for each trial (col)
-            ismax = ismax * np.random.random(size=ismax.shape)  # randomise value of 1s in matrix
-            trial_pref_idx = ismax.argmax(0)  # idx of pref (row) with max response
-            wta_est.append(trial_prefs[trial_pref_idx])
+            trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(0)  # idx of pref (row) with max response
+            wta_est.append(trial_prefs[idx][trial_pref_idx])
             # which pref produced the strongest response each trial
         self.decoded['wta'] = wta_est
         return wta_est
 
-    def popvector(self, pop_resp=None, trial_prefs=None):
+    def popvector(self, pop_resp=None, rolling_prefs=None):
         # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
         # trial_prefs: 1D prefs(vals)
         if pop_resp is None:
             pop_resp = self.resp_noisy
-        if trial_prefs is None:
-            trial_prefs = self.rolling_prefs
+        if rolling_prefs is None:
+            rolling_prefs = self.rolling_prefs
         popvector_est = []
         for idx in range(len(pop_resp)):
             trial_resp = pop_resp[idx]
-            trial_prefs = trial_prefs[idx] * (np.pi / 180)  # convert to radians
-            hori = np.sum((trial_resp.T * np.cos(trial_prefs)).T, 0)
-            vert = np.sum((trial_resp.T * np.sin(trial_prefs)).T, 0)
+            cond_prefs = rolling_prefs[idx] * (np.pi / 180)  # convert to radians
+            hori = np.sum((trial_resp.T * np.cos(cond_prefs)).T, 0)
+            vert = np.sum((trial_resp.T * np.sin(cond_prefs)).T, 0)
             popvector_est.append(np.arctan2(vert, hori) * (180 / np.pi))  # inverse tangent in degrees
         self.decoded['pv'] = popvector_est
         return popvector_est
@@ -327,14 +334,7 @@ class Decoder:
         return maxlikelihood_est
 
 
-# def decode(self, response=None, method):
-#     if response is None:
-#         response = self.resp_noisy
-#     for trial_idx, trial_resp in enumerate(range(len(response))):
-
-
-# todo why is resp_noisy ndim==3
-
+# todo create Decoder as child class of TrialHandler
 
 cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
@@ -403,12 +403,25 @@ PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim
 PopResponse.run()
 
 Decoded = Decoder(resp_noisy=PopResponse.resp_noisy, rolling_tunings=PopResponse.rolling_tunings,
-                  rolling_prefs=PopResponse.rolling_prefs, tiling=FeatureSpace.tiling)
+                  rolling_prefs=PopResponse.rolling_prefs, tiling=FeatureSpace.tiling, stim_vals=Stim.stim_vals)
 
 # decode (WTA, PV, ML, ?pooling?)
 Decoded.wta()
 Decoded.popvector()
 Decoded.maxlikelihood()
+
+analysis = {}
+for method in Decoded.decoded:
+    estimates = Decoded.decoded[method]
+    idxs = range(len(estimates))
+    analysis[method] = {'stdev': np.asarray([np.std(estimates[i]) for i in idxs]),
+                        'mean_abserr': np.asarray([calc_error(estimates[i], Stim.stim_vals[i]) for i in idxs])
+                        }
+
+
+# stdDev = std(decoded, 0, 2);
+# % calculate absolute error
+# absErr = abs(decoded - transpose(ps.stim.v));
 
 print('debug')
 
