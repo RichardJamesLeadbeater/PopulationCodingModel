@@ -94,7 +94,7 @@ class Stimuli:
 class NeuralPopulation:
     """params and sampling for neural population with independent properties"""
 
-    def __init__(self, name, boundaries, sampling_freq, sigma=10, r_max=60, spont=0.05):
+    def __init__(self, name, boundaries, sampling_freq, r_max=60, semi_sat=10, exponent=4, sigma=10, spont=0.05):
         self.tunings = None
         self.prefs = None
         self.prefs_idx = None
@@ -104,6 +104,8 @@ class NeuralPopulation:
         self.sigma = sigma  # sigma of gaussian tuning
         self.r_max = r_max
         self.spont = spont
+        self.semi_sat = semi_sat
+        self.exponent = exponent
 
     def generate_prefs(self, tiling):
         #  in: self.boundaries, self.sampling_freq, min_val, max_val, tiling
@@ -145,6 +147,17 @@ class NeuralPopulation:
         tunings = tunings * self.r_max + (self.spont * self.r_max)  # normalise to rmax then + spont firing
         self.tunings = tunings
         return self.tunings
+
+    def hyperbolic_ratio(self, stim_contrast, n=None, c50=None, tuned_resp=None):
+        # con is contrast of stimulus
+        # n is exponent for steepness of curve
+        if n is None:
+            n = self.exponent
+        # semi_saturation constant is contrast for half-max response
+        if c50 is None:
+            c50 = self.semi_sat
+        response = tuned_resp * (stim_contrast**n / (stim_contrast**n + c50**n))
+        return response
 
 
 class PopulationTuning:
