@@ -8,20 +8,18 @@
 # ...these values change depending upon the stimulus value;
 # ...e.g. if stimulus value == -45, the preferences used will be (-135:135)
 # ...     if stimulus value == 85, the preferences used will be (-5:175)
-
+import random
 
 import numpy as np
 from scipy.linalg import hankel
 import pandas as pd
 
 
-def find_nearest(array, values):  # nearest value and index in array for each value
-    nearest_idx = np.zeros(shape=values.shape, dtype='int')
-    nearest_values = np.zeros(shape=values.shape)
-    for idx, ii in enumerate(values):
-        nearest_idx[idx] = (np.abs(array - ii)).argmin()
-        nearest_values[idx] = array[nearest_idx[idx]]
-    return nearest_values, nearest_idx
+def find_nearest(array, value):  # nearest value and index in array for each value
+    array = np.asarray(array)
+    nearest_idx = (np.abs(array - value)).argmin()
+    nearest_value = array[nearest_idx]
+    return nearest_value, nearest_idx
 
 
 def sort_by_standard(standard, *args):
@@ -74,24 +72,17 @@ class Tiling:
 class Stimuli:
     """values of MyStimuli across feature space"""
 
-    def __init__(self, n_stim, min_stim, max_stim, tiling, distribution='rand'):
-        self.n_stim = n_stim
-        self.min_val = min_stim
-        self.max_val = max_stim
+    def __init__(self, stim_val=None, stim_contrast=None, tiling=None):
         self.tiling = tiling
+        self.stim_val = stim_val
+        self.stim_contrast = stim_contrast
+        _, self.stim_idx = find_nearest(tiling, stim_val)
 
-        self.distribution = distribution
-        stim_vals = None
-        if distribution == 'unif':  # achieves near-equal spacing of stim_vals
-            stim_freq = abs(min_stim - max_stim) / n_stim
-            stim_vals = np.linspace(min_stim, max_stim - stim_freq, n_stim)  # no repeats e.g. -90 and 90
-        elif distribution == 'rand':  # random spacing of stim_vals
-            stim_vals = np.random.uniform(min_stim, max_stim, n_stim)
-        # nearest val & idx in array for each given value
-        stim_vals, stim_indices = find_nearest(tiling, stim_vals)
-
-        self.stim_vals = np.sort(stim_vals)
-        self.stim_indices = np.sort(stim_indices)
+    def get_stim_idx(self, stim_val=None):
+        if stim_val is None:
+            stim_val = self.stim_val
+        self.stim_val, self.stim_idx = find_nearest(self.tiling, stim_val)
+        return self.stim_idx
 
 
 class NeuralPopulation:
@@ -160,7 +151,7 @@ class NeuralPopulation:
         # semi_saturation constant is contrast for half-max response
         if c50 is None:
             c50 = self.semi_sat
-        response = tuned_resp * (stim_contrast**n / (stim_contrast**n + c50**n))  # hyperbolic ratio
+        response = tuned_resp * (stim_contrast ** n / (stim_contrast ** n + c50 ** n))  # hyperbolic ratio
         return response
 
 
@@ -233,14 +224,46 @@ def adjust_adjacents(value_list, operation='mean'):
 def adjust_boundaries(boundaries, adjuster_values):
     # input bounds for each ori, and frequency averages for each ori
     # adjust boundaries to smoothly switch between different sampling rates
+
     for idx in range(len(boundaries)):
         boundaries[idx] = np.asarray(boundaries[idx])
+
     adjuster_values = np.asarray(adjuster_values)
     adjusted_bounds = [[]] * len(boundaries)
+
     for idx, ii in enumerate(boundaries):  # loop through each ori bounds
         adjuster = adjuster_values[idx]
         adjusted_bounds[idx] = ii + ((adjuster * [1, -1]) / 2)
+
     return adjusted_bounds
+
+
+class PopResponse:
+    def __init__(self, stim_val, stim_idx, tunings, prefs_windows, prefs_all):
+        self.stim_val = stim_val
+        self.stim_idx = stim_idx
+        self.tunings = tunings
+        self.prefs_windows = prefs_windows
+        self.prefs_all = prefs_all
+        self.resp_tuned = None
+        self.resp_noisy = None
+        self.trial_prefs = None
+        self.trial_tunings = None
+
+    def gen_stim_response(self):
+        stim_val = self.stim_val
+        stim_idx = self.stim_idx
+        # save used window of prefs and tunings for later decoding
+        self.trial_prefs, trial_prefs_idxs = shift_prefs(stim_val, self.trial_prefs, self.prefs_all)
+        # tunings within prefs window for this stim_val
+        self.trial_tunings = self.tunings[trial_prefs_idxs, :]  # save trial tunings for max likelihood
+        # generate noiseless response from tunings
+        self.resp_tuned = self.tunings[trial_prefs_idxs, stim_idx]
+        # error checking that stim val is in centre of prefs window (circular tuning)
+        if self.resp_tuned.argmax() != 87 and self.resp_tuned.argmax() != 88:
+            print(f'stim_val not in centre of prefs window - in position {self.resp_tuned.argmax()}')
+        # generate noisy response using poisson noise
+        self.resp_noisy = np.random.poisson(self.resp_tuned)
 
 
 # todo create trial handler class which can store data from multiple runs
@@ -313,7 +336,8 @@ class Decoder:
         for idx in range(len(pop_resp)):
             trial_max = pop_resp[idx].max(0)  # max response for each trial (col)
             ismax = (trial_max == pop_resp[idx]).astype('int')  # bool 01 matrix of max for each trial (col)
-            trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(0)  # idx of pref (row) with max response
+            trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(
+                0)  # idx of pref (row) with max response
             wta_est.append(trial_prefs[idx][trial_pref_idx])
             # which pref produced the strongest response each trial
         self.decoded['wta'] = wta_est
@@ -353,7 +377,16 @@ class Decoder:
         return maxlikelihood_est
 
 
-# todo create Decoder as child class of TrialHandler
+class StaircaseHandler:
+    def __init__(self, level, step_sizes):
+        self.n_corr = 0  # tracks n of corr answers in a row
+        self.level = level
+        self.stepsizes = step_sizes
+        self.current_stepsize = step_sizes[0]
+    def update_staircase(self):
+        if self.n_corr == 2:
+            self.level -= self.current_stepsize
+            self.n_corr = 0
 
 cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
@@ -385,63 +418,87 @@ for idx, ori in enumerate(ori_populations):
 
 # define params for tiling of extended feature space (e.g. ori is from -90 to 90, so have -180 to 180)
 FeatureSpace = Tiling(min_tile=-180, max_tile=180, stepsize=0.05)
-# define params for MyStimuli values within normal feature space (e.g. ori stim = [-90:90]
-Stim = Stimuli(n_stim=20, min_stim=-90, max_stim=90-FeatureSpace.stepsize,
-               tiling=FeatureSpace.tiling, distribution='rand')
 
-PopTuning = PopulationTuning()
+PopTuning = PopulationTuning()  # initialise attributes in PopulationTuning
 for idx, ori in enumerate(ori_populations):
     ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)  # prefs for each ori
     ori_populations[ori].generate_tunings(tiling=FeatureSpace.tiling)  # tunings for each ori
     # concatenate prefs, prefs_idx, tunings
     PopTuning.all_prefs = np.hstack([PopTuning.all_prefs, ori_populations[ori].prefs])
     PopTuning.all_prefs_idx = np.hstack([PopTuning.all_prefs_idx, ori_populations[ori].prefs_idx])
-    PopTuning.tunings.append(ori_populations[ori].tunings)  # rows=prefs, cols=tiling, vals=tuned_response
+    PopTuning.tunings.append(ori_populations[ori].tunings)
 PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])  # concat all appended tunings
 # sort prefs_idx and tunings by indices of prefs in ascending order
-(PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,
-                                                                                     PopTuning.all_prefs_idx,                                                                   PopTuning.tunings)
+(PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,                                                                          PopTuning.all_prefs_idx,                                                                   PopTuning.tunings)
 # create array of all possible pref windows - switch between dependent on stim_val
 # ensures population vector is equally accurate regardless of stim_val (circular tuning)
 PopTuning.rolling_window(vector=PopTuning.all_prefs,
                          window=PopTuning.all_prefs[(PopTuning.all_prefs >= -90) & (PopTuning.all_prefs < 90)])
 
-# generate response for allPops from stim_vals
-# [resp_n, noiseless, shift_prefs, shift_tunings] = genPopResponse(tunings, params);
-# input tunings params
-# output noisy and noiseless response; shifted prefs & tunings for each stim presentat
+# model setup is complete, can begin trials
+print('pause')
+ori_std = [-45, 0, 45, 90]
+contrast = [2.5, 5, 10, 20, 40]
+start_val = 20
+Staircase = StaircaseHandler(level=start_val)
 
-# get idx of min and max of pref_window, in all_prefs - index with these values
-# loop through each stimulus:
+continue_exp = True
+while continue_exp:
+    level = Staircase.level
+    for i_ori in ori_std:  # loop through each standard orientation
+        for i_con in contrast:  # loop through each value of iv
+            StandardStim = Stimuli(stim_val=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
+            if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
+                corr_ans = 'CW'
+                ComparisonStim = Stimuli(stim_val=i_ori + level,
+                                         stim_contrast=i_con, tiling=FeatureSpace.tiling)
+            else:
+                corr_ans = 'CCW'
+                ComparisonStim = Stimuli(stim_val=i_ori - level,
+                                         stim_contrast=i_con, tiling=FeatureSpace.tiling)
 
-PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim.stim_indices,
-                           tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
-                           prefs_all=PopTuning.all_prefs)
-PopResponse.run()
+            StandardResp = PopResponse(stim_val=StandardStim.stim_val, stim_idx=StandardStim.stim_idx,
+                                       tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+                                       prefs_all=PopTuning.all_prefs)
+            ComparisonResp = PopResponse(stim_val=ComparisonStim.stim_val, stim_idx=ComparisonStim.stim_idx,
+                                         tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+                                         prefs_all=PopTuning.all_prefs)
 
-Decoded = Decoder(resp_noisy=PopResponse.resp_noisy, rolling_tunings=PopResponse.rolling_tunings,
-                  rolling_prefs=PopResponse.rolling_prefs, tiling=FeatureSpace.tiling, stim_vals=Stim.stim_vals)
+            StandardDecoded = Decoder(StandardResp.resp_noisy, StandardResp.trial_tunings,
+                                      StandardResp.trial_prefs, StandardStim.stim_val, FeatureSpace.tiling)
+            ComparisonDecoded = Decoder(ComparisonResp.resp_noisy, ComparisonResp.trial_tunings,
+                                        ComparisonResp.trial_prefs, ComparisonStim.stim_val, FeatureSpace.tiling)
 
-# decode (WTA, PV, ML, ?pooling?)
-Decoded.wta()
-Decoded.popvector()
-Decoded.maxlikelihood()
+            StandardDecoded.wta()
+            ComparisonDecoded.wta()
 
-analysis = {}
-for method in Decoded.decoded:
-    estimates = Decoded.decoded[method]
-    idxs = range(len(estimates))
-    analysis[method] = {'stdev': np.asarray([np.std(estimates[i]) for i in idxs]),
-                        'mean_abserr': np.asarray([calc_error(estimates[i], Stim.stim_vals[i]) for i in idxs])
-                        }
+            StandardDecoded.popvector()
+            ComparisonDecoded.popvector()
 
-# stdDev = std(decoded, 0, 2);
-# % calculate absolute error
-# absErr = abs(decoded - transpose(ps.stim.v));
+            StandardDecoded.maxlikelihood()
+            ComparisonDecoded.maxlikelihood()
 
-print('debug')
 
-# todo decision stage
+# Stimuli
+# -	Contrast (constant)
+# -	Orientation (change each loop in staircase)
+# - Two intervals
 
-# todo staircase
-
+# Staircase
+# -	Set initial oridiff value.
+# -	Change step size on each reversal
+# -	Decision stage
+# o	Decoded_1 < Decoded_2; n_corr += 1
+# -	3 down 1 up
+# o	if n_corr == 3; ori -= stepsize[i]
+#
+# Neural Population
+# -	Contrast response function
+# -	Density
+# -	Tuning
+# -	Max response
+#
+# Decoders
+# -	WTA
+# -	PV
+# -	ML
