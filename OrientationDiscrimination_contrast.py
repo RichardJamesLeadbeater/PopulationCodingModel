@@ -29,6 +29,7 @@ def find_nearest(array, value):  # nearest value and index in array for each val
             nearest_value.append(array[nearest_idx[-1]])
     return nearest_value, nearest_idx
 
+
 def sort_by_standard(standard, *args):
     # sorts arrays with inds matching ascending order of standard
     standard = np.asarray(standard)
@@ -268,57 +269,10 @@ class PopResponse:
         self.resp_tuned = self.tunings[trial_prefs_idxs, stim_idx]
         # error checking that stim val is in centre of prefs window (circular tuning)
         if self.resp_tuned.argmax() != 87 and self.resp_tuned.argmax() != 88:
-            print(f'stim_val not in centre of prefs window - in position {self.resp_tuned.argmax()}')
+            print(f'stim_val not in centre of prefs window, in position {self.resp_tuned.argmax()}')
+            print('debug')
         # generate noisy response using poisson noise
         self.resp_noisy = np.random.poisson(self.resp_tuned)
-
-
-# todo create trial handler class which can store data from multiple runs
-class TrialHandler:
-    def __init__(self, n_trials, stim_vals, stim_idxs, tunings, prefs_windows, prefs_all):
-        self.n_trials = n_trials
-        self.prefs_windows = prefs_windows
-        self.prefs_all = prefs_all
-        self.tunings = tunings
-        self.stim_idxs = stim_idxs
-        self.stim_vals = stim_vals
-        self.resp_noiseless = []
-        self.resp_noisy = []
-        self.rolling_prefs = []
-        self.rolling_tunings = []
-
-    def run(self):
-        resp_noisy = []
-        resp_noiseless = []
-        rolling_prefs = []
-        rolling_tunings = []
-        for idx, stim_val in enumerate(self.stim_vals):
-            stim_idx = self.stim_idxs[idx]
-            prefs_window_vals, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
-            rolling_prefs.append(prefs_window_vals)  # save trial prefs window for later decoding
-            rolling_tunings.append(self.tunings[prefs_window_idxs, :])  # save trial tunings for max likelihood
-            noiseless = self.tunings[prefs_window_idxs, stim_idx]
-            # only use tunings within prefs window for this stim_val
-            # error checking that stim val is in centre of prefs window
-            if noiseless.argmax() != 87 and noiseless.argmax() != 88:
-                print(f'stim_val not in centre of prefs window - in position {noiseless.argmax()}')
-            # repeat noiseless response for n_trials
-            resp_noiseless.append(np.transpose(noiseless * np.ones([self.n_trials, 1])))
-            # get noisy response for all prefs across all trials
-            resp_noisy.append(np.random.poisson(resp_noiseless[-1]))
-
-        self.rolling_prefs = rolling_prefs
-        self.rolling_tunings = rolling_tunings
-        self.resp_noiseless = resp_noiseless
-        self.resp_noisy = resp_noisy
-
-        return resp_noiseless, resp_noisy
-
-
-def calc_error(decoded_vals, stim_val):
-    abs_error = np.asarray(abs(decoded_vals - stim_val))
-    mean_abs_error = np.mean(abs_error)
-    return mean_abs_error
 
 
 class Decoder:
@@ -379,21 +333,40 @@ class Decoder:
 
 
 class StaircaseHandler:
-    def __init__(self, current_level, step_sizes, n_up, n_down, n_reversals, revs_per_thresh):
+    def __init__(self, start_level, step_sizes, n_up, n_down, n_reversals, revs_per_thresh, decoder_info,
+                 max_level=None, current_level=None):
+        self.run_info = {'decoder': [decoder_info], 'ori': [], 'iv': [], 'threshold': []}  # for use w/ external function
         self.revs_per_thresh = revs_per_thresh
         self.n_down = n_down
         self.n_up = n_up
         self.n_reversals = n_reversals
         self.is_corr = []  # tracks n of corr answers in a row
-        self.current_level = current_level
-        self.stepsizes = step_sizes
+        self.start_level = start_level
+        if current_level is None:
+            self.current_level = start_level
+        if max_level is None:
+            self.max_level = start_level
+        self.step_sizes = step_sizes
         self.stepsizes_idx = 0
         self.current_stepsize = step_sizes[0]
         self.level_list = [current_level]
         self.current_direction = 'down'
         self.reversals = []
         self.continue_staircase = True
-        self.threshold = None
+        self.threshold = []
+
+    def stop(self):
+        if not self.continue_staircase:
+            self.run_info['decoder'].append(self.run_info['decoder'][0])
+            self.run_info['threshold'].append(self.threshold)
+            # reset initial values to defaults
+            self.is_corr = []  # tracks n of corr answers in a row
+            self.current_level = self.start_level
+            self.stepsizes_idx = 0
+            self.current_stepsize = self.step_sizes[0]
+            self.level_list = [self.current_level]
+            self.current_direction = 'down'
+            self.reversals = []
 
     def is_correct(self, correct_ans, given_ans):
         if correct_ans == given_ans:
@@ -402,25 +375,26 @@ class StaircaseHandler:
             self.is_corr.append(0)  # wrong answer
         self.update_staircase()
 
-    def update_level(self, direction=None):
-        if direction is None:
-            direction = self.current_direction
-        if direction == 'up':
-            self.current_level *= self.current_level * (self.current_stepsize ** 10)
-        elif direction == 'down':
-            self.current_level /= self.current_level * (self.current_stepsize ** 10)
-        if len(self.stepsizes) == self.stepsizes_idx:
+    def update_level(self, current_direction=None):
+        if current_direction is None:
+            current_direction = self.current_direction
+        if current_direction == 'up':
+            self.current_level *= 10 ** self.current_stepsize
+            if self.current_level > self.max_level:
+                self.current_level = self.max_level  # force back to max
+        elif current_direction == 'down':
+            self.current_level /= 10 ** self.current_stepsize
+        if len(self.step_sizes) - 1 == self.stepsizes_idx:  # hold on last stepsize once reached
             pass
         else:
             self.stepsizes_idx += 1
 
     def calc_threshold(self):
-        self.threshold = np.mean(self.reversals[-self.revs_per_thresh:])
+        self.threshold.append(np.mean(self.reversals[-self.revs_per_thresh:]))
         return self.threshold
 
     def update_staircase(self):
-        self.current_stepsize = self.stepsizes[self.stepsizes_idx]
-
+        self.current_stepsize = self.step_sizes[self.stepsizes_idx]
         # check if staircase needs to step down
         if len(self.is_corr) >= self.n_down:  # only check for step up when possible
             if all(i == 1 for i in self.is_corr[-self.n_down:]):
@@ -431,18 +405,19 @@ class StaircaseHandler:
 
         # check if staircase needs to step up
         if len(self.is_corr) >= self.n_up:  # only check for step up when possible
-            if all(i == 0 for i in self.is_corr[-self.n_up:]):
+            if all(i == 0 for i in self.is_corr[-self.n_up:]):  # checks if incorrect answer
                 if self.current_direction == 'down':  # if change in direction of staircase
                     self.reversals.append(self.current_level)
                 self.current_direction = 'up'
                 self.update_level()
 
-        # todo probably needs to be done before update level (or put in a function e.g. checkiffinished())
-        if self.reversals == self.n_reversals:
+        if len(self.reversals) == self.n_reversals:  # if predetermined n reversals reached, end exp
             self.continue_staircase = False
             self.calc_threshold()
 
-        self.level_list.append(self.current_level)
+        if self.continue_staircase:
+            self.level_list.append(self.current_level)
+
 
 cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
@@ -473,7 +448,7 @@ for idx, ori in enumerate(ori_populations):
     ori_populations[ori].boundaries = bounds_adjusted[idx]
 
 # define params for tiling of extended feature space (e.g. ori is from -90 to 90, so have -180 to 180)
-FeatureSpace = Tiling(min_tile=-180, max_tile=180, stepsize=0.05)
+FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
 
 PopTuning = PopulationTuning()  # initialise attributes in PopulationTuning
 for idx, ori in enumerate(ori_populations):
@@ -485,7 +460,9 @@ for idx, ori in enumerate(ori_populations):
     PopTuning.tunings.append(ori_populations[ori].tunings)
 PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])  # concat all appended tunings
 # sort prefs_idx and tunings by indices of prefs in ascending order
-(PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,                                                                          PopTuning.all_prefs_idx,                                                                   PopTuning.tunings)
+(PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,
+                                                                                     PopTuning.all_prefs_idx,
+                                                                                     PopTuning.tunings)
 # create array of all possible pref windows - switch between dependent on stim_val
 # ensures population vector is equally accurate regardless of stim_val (circular tuning)
 PopTuning.rolling_window(vector=PopTuning.all_prefs,
@@ -495,54 +472,124 @@ PopTuning.rolling_window(vector=PopTuning.all_prefs,
 ori_std = [-45, 0, 45, 90]
 contrast = [2.5, 5, 10, 20, 40]
 start_val = 20
-Staircase = StaircaseHandler(current_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
-                             n_reversals=10, revs_per_thresh=6)
-continue_exp = True
+StaircaseWTA = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
+                                n_reversals=10, revs_per_thresh=6, decoder_info='WTA')
+StaircasePV = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
+                               n_reversals=10, revs_per_thresh=6, decoder_info='PV')
+StaircaseML = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
+                               n_reversals=10, revs_per_thresh=6, decoder_info='ML')
+
 
 # todo contrast response function
-# todo store absolute reversal value of level
 
-while continue_exp:
-    level = Staircase.current_level
-    for i_ori in ori_std:  # loop through each standard orientation
-        for i_con in contrast:  # loop through each value of iv
-            StandardStim = Stimuli(stim_val=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
-            if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
-                corr_ans = 'CW'
-                ComparisonStim = Stimuli(stim_val=i_ori + level,
-                                         stim_contrast=i_con, tiling=FeatureSpace.tiling)
-            else:
-                corr_ans = 'CCW'
-                ComparisonStim = Stimuli(stim_val=i_ori - level,
-                                         stim_contrast=i_con, tiling=FeatureSpace.tiling)
 
-            StandardResp = PopResponse(stim_val=StandardStim.stim_val, stim_idx=StandardStim.stim_idx,
-                                       tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
-                                       prefs_all=PopTuning.all_prefs)
-            StandardResp.gen_stim_response()
-            ComparisonResp = PopResponse(stim_val=ComparisonStim.stim_val, stim_idx=ComparisonStim.stim_idx,
-                                         tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
-                                         prefs_all=PopTuning.all_prefs)
-            ComparisonResp.gen_stim_response()
+def perform_temporal2afc(Staircase, oris, contrasts):
+    for i_ori in oris:  # loop through each standard orientation
+        for i_con in contrasts:  # loop through each value of iv
+            Staircase.run_info['ori'].append(i_ori)
+            Staircase.run_info['iv'].append(i_con)
+            Staircase.continue_staircase = True
+            while Staircase.continue_staircase:
+                level = Staircase.current_level
+                StandardStim = Stimuli(stim_val=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
+                if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
+                    corr_ans = 'CW'
+                    ComparisonStim = Stimuli(stim_val=i_ori + level,
+                                             stim_contrast=i_con, tiling=FeatureSpace.tiling)
+                else:
+                    corr_ans = 'CCW'
+                    ComparisonStim = Stimuli(stim_val=i_ori - level,
+                                             stim_contrast=i_con, tiling=FeatureSpace.tiling)
 
-            StandardDecoded = Decoder(StandardResp.resp_noisy, StandardResp.trial_tunings,
-                                      StandardResp.trial_prefs, StandardStim.stim_val, FeatureSpace.tiling)
-            ComparisonDecoded = Decoder(ComparisonResp.resp_noisy, ComparisonResp.trial_tunings,
-                                        ComparisonResp.trial_prefs, ComparisonStim.stim_val, FeatureSpace.tiling)
+                StandardResp = PopResponse(stim_val=StandardStim.stim_val, stim_idx=StandardStim.stim_idx,
+                                           tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+                                           prefs_all=PopTuning.all_prefs)
+                StandardResp.gen_stim_response()
+                ComparisonResp = PopResponse(stim_val=ComparisonStim.stim_val, stim_idx=ComparisonStim.stim_idx,
+                                             tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+                                             prefs_all=PopTuning.all_prefs)
+                ComparisonResp.gen_stim_response()
 
-            if ComparisonDecoded.wta() < StandardDecoded.wta():
-                this_ans = 'CCW'
-            else:
-                this_ans = 'CW'
-            Staircase.is_correct(this_ans, corr_ans)  # checks if correct and updates staircase accordingly
+                StandardDecoded = Decoder(StandardResp.resp_noisy, StandardResp.trial_tunings,
+                                          StandardResp.trial_prefs, StandardStim.stim_val, FeatureSpace.tiling)
+                ComparisonDecoded = Decoder(ComparisonResp.resp_noisy, ComparisonResp.trial_tunings,
+                                            ComparisonResp.trial_prefs, ComparisonStim.stim_val, FeatureSpace.tiling)
 
-            StandardDecoded.popvector()
-            ComparisonDecoded.popvector()
+                this_ans = None  # init
+                if Staircase.run_info['decoder'][0] == 'WTA':
+                    if ComparisonDecoded.wta() < StandardDecoded.wta():
+                        this_ans = 'CCW'
+                    else:
+                        this_ans = 'CW'
 
-            StandardDecoded.maxlikelihood()
-            ComparisonDecoded.maxlikelihood()
+                elif Staircase.run_info['decoder'][0] == 'PV':
+                    if ComparisonDecoded.popvector() < StandardDecoded.popvector():
+                        this_ans = 'CCW'
+                    else:
+                        this_ans = 'CW'
 
-            print('')
+                elif Staircase.run_info['decoder'][0] == 'ML':
+                    if ComparisonDecoded.maxlikelihood() < StandardDecoded.maxlikelihood():
+                        this_ans = 'CCW'
+                    else:
+                        this_ans = 'CW'
+
+                Staircase.is_correct(this_ans, corr_ans)  # checks if correct and updates staircase accordingly
+
+                if not Staircase.continue_staircase:
+                    Staircase.stop()
+
+
+for i_Staircase in [StaircaseWTA, StaircasePV, StaircaseML]:
+    perform_temporal2afc(i_Staircase, ori_std, contrast)  # performs staircase for every combination of conditions
+print('debug')
+
+# todo implement contrast response function
+# todo implement n_runs per condition
+
+# for i_ori in ori_std:  # loop through each standard orientation
+#     for i_con in contrast:  # loop through each value of iv
+#         while Staircase.continue_staircase:
+#             level = Staircase.current_level
+#             StandardStim = Stimuli(stim_val=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
+#             if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
+#                 corr_ans = 'CW'
+#                 ComparisonStim = Stimuli(stim_val=i_ori + level,
+#                                          stim_contrast=i_con, tiling=FeatureSpace.tiling)
+#             else:
+#                 corr_ans = 'CCW'
+#                 ComparisonStim = Stimuli(stim_val=i_ori - level,
+#                                          stim_contrast=i_con, tiling=FeatureSpace.tiling)
+#
+#             StandardResp = PopResponse(stim_val=StandardStim.stim_val, stim_idx=StandardStim.stim_idx,
+#                                        tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+#                                        prefs_all=PopTuning.all_prefs)
+#             StandardResp.gen_stim_response()
+#             ComparisonResp = PopResponse(stim_val=ComparisonStim.stim_val, stim_idx=ComparisonStim.stim_idx,
+#                                          tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+#                                          prefs_all=PopTuning.all_prefs)
+#             ComparisonResp.gen_stim_response()
+#
+#             StandardDecoded = Decoder(StandardResp.resp_noisy, StandardResp.trial_tunings,
+#                                       StandardResp.trial_prefs, StandardStim.stim_val, FeatureSpace.tiling)
+#             ComparisonDecoded = Decoder(ComparisonResp.resp_noisy, ComparisonResp.trial_tunings,
+#                                         ComparisonResp.trial_prefs, ComparisonStim.stim_val, FeatureSpace.tiling)
+#
+#             if ComparisonDecoded.wta() < StandardDecoded.wta():
+#                 this_ans = 'CCW'
+#             else:
+#                 this_ans = 'CW'
+#             StaircaseWTA.is_correct(this_ans, corr_ans)  # checks if correct and updates staircase accordingly
+#
+#             StandardDecoded.popvector()
+#             ComparisonDecoded.popvector()
+#
+#             StandardDecoded.maxlikelihood()
+#             ComparisonDecoded.maxlikelihood()
+#
+#             if not Staircase.continue_staircase:
+#                 break
+
 # todo
 
 # Stimuli
