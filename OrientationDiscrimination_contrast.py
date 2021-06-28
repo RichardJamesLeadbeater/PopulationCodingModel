@@ -379,7 +379,8 @@ class Decoder:
 
 
 class StaircaseHandler:
-    def __init__(self, current_level, step_sizes, n_up, n_down, n_reversals):
+    def __init__(self, current_level, step_sizes, n_up, n_down, n_reversals, revs_per_thresh):
+        self.revs_per_thresh = revs_per_thresh
         self.n_down = n_down
         self.n_up = n_up
         self.n_reversals = n_reversals
@@ -392,6 +393,7 @@ class StaircaseHandler:
         self.current_direction = 'down'
         self.reversals = []
         self.continue_staircase = True
+        self.threshold = None
 
     def is_correct(self, correct_ans, given_ans):
         if correct_ans == given_ans:
@@ -407,9 +409,14 @@ class StaircaseHandler:
             self.current_level *= self.current_level * (self.current_stepsize ** 10)
         elif direction == 'down':
             self.current_level /= self.current_level * (self.current_stepsize ** 10)
-        self.stepsizes_idx += 1
-        if self.stepsizes_idx == self.n_reversals:
-            self.continue_staircase = False
+        if len(self.stepsizes) == self.stepsizes_idx:
+            pass
+        else:
+            self.stepsizes_idx += 1
+
+    def calc_threshold(self):
+        self.threshold = np.mean(self.reversals[-self.revs_per_thresh:])
+        return self.threshold
 
     def update_staircase(self):
         self.current_stepsize = self.stepsizes[self.stepsizes_idx]
@@ -429,6 +436,11 @@ class StaircaseHandler:
                     self.reversals.append(self.current_level)
                 self.current_direction = 'up'
                 self.update_level()
+
+        # todo probably needs to be done before update level (or put in a function e.g. checkiffinished())
+        if self.reversals == self.n_reversals:
+            self.continue_staircase = False
+            self.calc_threshold()
 
         self.level_list.append(self.current_level)
 
@@ -483,7 +495,8 @@ PopTuning.rolling_window(vector=PopTuning.all_prefs,
 ori_std = [-45, 0, 45, 90]
 contrast = [2.5, 5, 10, 20, 40]
 start_val = 20
-Staircase = StaircaseHandler(current_level=start_val, step_sizes=[1], n_up=1, n_down=3)
+Staircase = StaircaseHandler(current_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
+                             n_reversals=10, revs_per_thresh=6)
 continue_exp = True
 
 # todo contrast response function
