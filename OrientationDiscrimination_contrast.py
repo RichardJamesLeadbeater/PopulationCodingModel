@@ -81,35 +81,48 @@ class Tiling:
 class Stimuli:
     """values of MyStimuli across feature space"""
 
-    def __init__(self, stim_val=None, stim_contrast=None, tiling=None):
+    def __init__(self, ori=None, con=None, tiling=None):
         self.tiling = tiling
-        self.stim_val = stim_val
-        self.stim_contrast = stim_contrast
-        _, self.stim_idx = find_nearest(tiling, stim_val)
+        self.ori = ori
+        self.con = con
+        _, self.ori_idx = find_nearest(tiling, ori)
 
-    def get_stim_idx(self, stim_val=None):
-        if stim_val is None:
-            stim_val = self.stim_val
-        self.stim_val, self.stim_idx = find_nearest(self.tiling, stim_val)
-        return self.stim_idx
+    def get_stim_ori_idx(self, stim_ori=None):
+        if stim_ori is None:
+            stim_ori = self.ori
+        self.ori, self.ori_idx = find_nearest(self.tiling, stim_ori)
+        return self.ori_idx
 
 
 class NeuralPopulation:
     """params and sampling for neural population with independent properties"""
 
-    def __init__(self, name, boundaries, sampling_freq, r_max=60, semi_sat=10, exponent=4, sigma=10, spont=0.05):
+    def __init__(self, name=None, boundaries=None, sampling_freq=None, r_max=60, semi_sat=10, exponent=4, sigma=10,
+                 spont=0.05, info=None):
+        if info is None:
+            self.info = {}
+        elif isinstance(info, dict):  # if dict input to give info
+            self.name = info['name']
+            self.boundaries = info['boundaries']
+            self.sampling_freq = info['sampling_freq']
+            self.sigma = info['sigma']
+            self.r_max = info['r_max']
+            self.spont = info['spont']
+            self.semi_sat = info['semi_sat']
+            self.exponent = info['exponent']
+        else:  # if values input on call
+            self.name = name
+            self.boundaries = boundaries  # [min, max]
+            self.sampling_freq = sampling_freq  # degrees per neuron pref
+            self.sigma = sigma  # sigma of gaussian tuning
+            self.r_max = r_max
+            self.spont = spont
+            self.semi_sat = semi_sat
+            self.exponent = exponent
+        # initialise
         self.tunings = None
         self.prefs = None
         self.prefs_idx = None
-        self.name = name
-        self.boundaries = boundaries  # [min, max]
-        self.sampling_freq = sampling_freq  # degrees per neuron pref
-        self.sigma = sigma  # sigma of gaussian tuning
-        self.r_max = r_max
-        self.spont = spont
-        self.semi_sat = semi_sat
-        self.exponent = exponent
-        self.info = None
 
     def get_info(self):
         self.info = dict(name=self.name, tunings=self.tunings, prefs=self.prefs, prefs_idx=self.prefs_idx,
@@ -123,7 +136,6 @@ class NeuralPopulation:
         #      generate prefs and round to nearest value in tiling
         #      get idx of each pref in tiling
         # out: prefs, prefs_idx, sampling_freq for each neuron from bounds and sampling freq
-
         # if 1D array then put boundaries into list
         if np.asarray(self.boundaries).ndim == 1:  # if one set of boundaries put in list for compatibility
             self.boundaries = [self.boundaries]
@@ -159,256 +171,252 @@ class NeuralPopulation:
         return self.tunings
 
 
-class PopulationTuning:
-    def __init__(self, indiv_populations=None, all_prefs=None, all_prefs_idx=None, tunings=None,
-                 window_prefs=None, window_prefs_idx=None):
-        if tunings is None:  # attributes to be appended external from class
-            tunings = []
-        if all_prefs_idx is None:
-            all_prefs_idx = []
-        if all_prefs is None:
-            all_prefs = []
-        if indiv_populations is None:
-            indiv_populations = []
-        self.indiv_populations = indiv_populations
-        self.all_prefs = all_prefs
-        self.all_prefs_idx = all_prefs_idx
-        self.tunings = tunings
-        self.window_prefs = window_prefs
-        self.window_prefs_idx = window_prefs_idx
-        self.indiv_populations = indiv_populations
-
-    def rolling_window(self, vector, window):
-        # create rolling window across vector
-        m = len(vector) - len(window)
-        self.window_prefs_idx = hankel(np.arange(0, m + 1), np.arange(m, len(vector)))
-        self.window_prefs = vector[self.window_prefs_idx]
-        return self.window_prefs, self.window_prefs_idx
-
-    def contrast_adjustment(self, resp_tuned=None, stim_contrast=100, n=4, c50=15):
-        # input all vars externally except resp_tuned
-        # Albrecht & Hamilton (1992): n=4 c50=15
-        # n is exponent for steepness of curve
-        # c50 semi_saturation constant is contrast for half-max response
-        if resp_tuned is None:
-            resp_tuned = self.resp_tuned
-        self.resp_tuned = resp_tuned * (stim_contrast ** n / (stim_contrast ** n + c50 ** n))  # hyperbolic ratio
-        return self.resp_tuned
-
-
-def shift_prefs(stim_val, possible_prefs, all_windows):
-    # get central value of each prefs window
-    centre_vals = np.mean([all_windows.min(1), all_windows.max(1)], 0)
-    # find index of centre_val(pref_window) closest to stim_val
-    window_idx = abs(centre_vals - stim_val).argmin()  # get row_idx (window) where centre_val is closest to stim_val
-    # use prefs window which has stim_val at it's centre
-    window_vals = all_windows[window_idx, :]
-    # get range of idxs so we can index tunings array
-    min_idx = abs(possible_prefs - window_vals.min()).argmin()  # start of window
-    max_idx = abs(possible_prefs - window_vals.max()).argmin()  # end of window
-    window_idxs = np.arange(min_idx, max_idx + 1)  # all idxs within window
-    return window_vals, window_idxs
-
-
-def get_boundaries(mid_values, bound_range):
-    boundaries = [[]] * len(mid_values)
-    for idx, val in enumerate(mid_values):
-        boundaries[idx] = [val - (bound_range / 2), val + (bound_range / 2)]
-    return boundaries
-
-
-def adjust_adjacents(value_list, operation='mean'):
-    """for each value, get average with each neighbouring value"""
-
-    avgs = [[]] * len(value_list)
-
-    for idx, val in enumerate(value_list):
-        if idx == 0:  # if first val then circle to end as cannot index 1-1
-            x = len(value_list) - 1
-            y = idx + 1
-        elif idx == len(value_list) - 1:  # if last val then circle to start as cannot index end+1
-            x = idx - 1
-            y = 0
-        else:  # middle indices pull vals to left and right of val
-            x = idx - 1
-            y = idx + 1
-
-        if operation == 'mean':
-            avgs[idx] = [np.mean([value_list[idx], value_list[x]]), np.mean([value_list[idx], value_list[y]])]
-
-    return avgs
-
-
-def adjust_boundaries(boundaries, adjuster_values):
-    # input bounds for each ori, and frequency averages for each ori
-    # adjust boundaries to smoothly switch between different sampling rates
-
-    for idx in range(len(boundaries)):
-        boundaries[idx] = np.asarray(boundaries[idx])
-
-    adjuster_values = np.asarray(adjuster_values)
-    adjusted_bounds = [[]] * len(boundaries)
-
-    for idx, ii in enumerate(boundaries):  # loop through each ori bounds
-        adjuster = adjuster_values[idx]
-        adjusted_bounds[idx] = ii + ((adjuster * [1, -1]) / 2)
-
-    return adjusted_bounds
-
-
 class PopulationCode:
-    def __init__(self, stim_val=None, stim_idx=None, prefs_windows=None, prefs_all=None, indiv_populations=None,
-                 all_prefs=None, all_prefs_idx=None, all_tunings=None, window_prefs=None, window_prefs_idx=None):
-        self.stim_val = stim_val
-        self.stim_idx = stim_idx
-        if all_tunings is None:  # attributes to be appended external from class
-            all_tunings = []
-        self.all_tunings = all_tunings
-        self.prefs_windows = prefs_windows
-        self.prefs_all = prefs_all
-        self.resp_tuned = None
-        self.resp_noisy = None
+    def __init__(self, tiling, neural_populations=None):
+        self.tiling = tiling
+        if neural_populations is None:
+            neural_populations = []
+        self.neural_populations = neural_populations
+        # the following will be appended in methods of class
+        self.all_tunings = []
+        self.all_prefs = []
+        self.all_prefs_idx = []
+        # the following will be calculated in methods of class
+        self.all_prefs_windows = None
+        self.all_prefs_windows_idx = None
+        self.trial_stim_ori = None
+        self.trial_stim_ori_idx = None
+        self.trial_stim_con = None
         self.trial_prefs = None
+        self.trial_prefs_idx = None
         self.trial_tunings = None
-        if all_prefs_idx is None:
-            all_prefs_idx = []
-        if all_prefs is None:
-            all_prefs = []
-        if indiv_populations is None:
-            indiv_populations = []
-        self.indiv_populations = indiv_populations
-        self.all_prefs = all_prefs
-        self.all_prefs_idx = all_prefs_idx
-        self.window_prefs = window_prefs
-        self.window_prefs_idx = window_prefs_idx
+        self.resp_tuned = None
+        self.resp_contrast = None
+        self.resp_noisy = None
+        self.decoded = None
 
-    def stack_populations(self):
+    def get_bounds_adjusters(self, value_list=None, operation='mean'):
+        # used to get average sampling frequency to allow boundary adjustment
+        """for each value, get average with each neighbouring value"""
+        if value_list is None:
+            value_list = [i_pop.sampling_freq for i_pop in self.neural_populations]
+        avgs = [[]] * len(value_list)
+        for idx, val in enumerate(value_list):
+            if idx == 0:  # if first val then circle to end as cannot index 1-1
+                x = len(value_list) - 1
+                y = idx + 1
+            elif idx == len(value_list) - 1:  # if last val then circle to start as cannot index end+1
+                x = idx - 1
+                y = 0
+            else:  # middle indices pull vals to left and right of val
+                x = idx - 1
+                y = idx + 1
+            if operation == 'mean':
+                avgs[idx] = [np.mean([value_list[idx], value_list[x]]), np.mean([value_list[idx], value_list[y]])]
+        return avgs
+
+    def adjust_boundaries(self, update=False):
+        # todo depends on order of list, need to ensure this is correct (use i_pop.boundaries[0] to order?)
+        # adjust boundaries to smoothly switch between different sampling rates
+        boundaries = [np.asarray(i_pop.boundaries) for i_pop in self.neural_populations]
+        # get average sampling frequency of adjacent orientations
+        adjuster_values = np.asarray(self.get_bounds_adjusters())
+        for idx, i_bounds in enumerate(boundaries):  # loop through each ori bounds
+            i_adjusted_bounds = i_bounds + ((adjuster_values[idx] * [1, -1]) / 2)
+            self.neural_populations[idx].boundaries = i_adjusted_bounds
+            if update:  # update tunings for new boundaries
+                self.neural_populations[idx].generate_prefs(self.tiling)
+                self.neural_populations[idx].generate_tunings(self.tiling)
+            else:
+                pass
+
+    def stack_populations(self, sort_by_prefs=True):
         all_prefs = []
         all_prefs_idx = []
         all_tunings = []
-        for idx, population in enumerate(self.indiv_populations):
-            all_prefs = np.hstack([all_prefs, self.indiv_populations[idx].prefs])
-            all_prefs_idx = np.hstack([all_prefs_idx, self.indiv_populations[idx].prefs_idx])
-            all_tunings.append(self.indiv_populations[idx].tunings)
+        for idx, i_pop in enumerate(self.neural_populations):
+            all_prefs = np.hstack([all_prefs, i_pop.prefs])
+            all_prefs_idx = np.hstack([all_prefs_idx, i_pop.prefs_idx])
+            all_tunings.append(i_pop.tunings)
         all_tunings = np.vstack([i for i in all_tunings])  # concat all appended tunings
         # sort prefs_idx and tunings by indices of prefs in ascending order
-        (all_prefs, all_prefs_idx, tunings) = sort_by_standard(all_prefs, all_prefs_idx, all_tunings)
+        if sort_by_prefs:
+            (all_prefs, all_prefs_idx, all_tunings) = sort_by_standard(all_prefs, all_prefs_idx, all_tunings)
+        # assign
         self.all_prefs = all_prefs
         self.all_prefs_idx = all_prefs_idx
         self.all_tunings = all_tunings
 
     def rolling_window(self, vector=None, window=None):
-        # create rolling prefs window across any range of space
+        # create rolling prefs window across any range of space (circular tuning)
         if vector is None:
             vector = self.all_prefs
         if window is None:
             # >= -90 to < 90 consists of all possible orientations in standard size feature space
             window = self.all_prefs[(self.all_prefs >= -90) & (self.all_prefs < 90)]
         m = len(vector) - len(window)
-        self.window_prefs_idx = hankel(np.arange(0, m + 1), np.arange(m, len(vector)))
-        self.window_prefs = vector[self.window_prefs_idx]
-        return self.window_prefs, self.window_prefs_idx
+        self.all_prefs_windows_idx = hankel(np.arange(0, m + 1), np.arange(m, len(vector)))
+        self.all_prefs_windows = vector[self.all_prefs_windows_idx]
+        return self.all_prefs_windows, self.all_prefs_windows_idx
 
-    def get_contrast_adjusted_tunings(self):
-        for idx, pop in self.indiv_populations:
-            exponent = self.indiv_populations[idx].exponent
-            semi_sat = self.indiv_populations[idx].semi_sat
-
-
-    def contrast_adjustment(self, resp_tuned=None, stim_contrast=100, n=4, c50=15):
-        # input all vars externally except resp_tuned
-        # Albrecht & Hamilton (1992): n=4 c50=15
-        # n is exponent for steepness of curve
-        # c50 semi_saturation constant is contrast for half-max response
-        if resp_tuned is None:
-            resp_tuned = self.resp_tuned
-        self.resp_tuned = resp_tuned * (stim_contrast ** n / (stim_contrast ** n + c50 ** n))  # hyperbolic ratio
-        return self.resp_tuned
-
-    def gen_stim_response(self):
-        stim_val = self.stim_val
-        stim_idx = self.stim_idx
-        # save used window of prefs and tunings for later decoding
-        self.trial_prefs, trial_prefs_idxs = shift_prefs(stim_val, self.prefs_all, self.prefs_windows)
-        # tunings within prefs window for this stim_val
-        self.trial_tunings = self.tunings[trial_prefs_idxs, :]  # save trial tunings for max likelihood
-        # generate noiseless response from tunings
-        self.resp_tuned = self.tunings[trial_prefs_idxs, stim_idx]
-        # error checking that stim val is in centre of prefs window (circular tuning)
-        if self.resp_tuned.argmax() != 87 and self.resp_tuned.argmax() != 88:
-            print(f'stim_val not in centre of prefs window, in position {self.resp_tuned.argmax()}')
-        # generate noisy response using poisson noise
-        self.resp_noisy = np.random.poisson(self.resp_tuned)
+    def gen_tunings(self, stack=True, window=True):
+        # generate prefs and tunings for each ori_pop
+        for idx, i_pop in enumerate(self.neural_populations):
+            self.neural_populations[idx].generate_prefs(self.tiling)
+            self.neural_populations[idx].generate_tunings(self.tiling)
+        if stack:
+            self.stack_populations()
+        if window:
+            self.rolling_window()
 
     def contrast_response(self, resp_tuned=None, stim_contrast=100, n=4, c50=15):
         # input all vars externally except resp_tuned
         # Albrecht & Hamilton (1992): n=4 c50=15
         # n is exponent for steepness of curve
         # c50 semi_saturation constant is contrast for half-max response
+        update = False
         if resp_tuned is None:
             resp_tuned = self.resp_tuned
-        self.resp_tuned = resp_tuned * (stim_contrast ** n / (stim_contrast ** n + c50 ** n))  # hyperbolic ratio
-        return self.resp_tuned
+            update = True
+        resp_contrast = resp_tuned * (stim_contrast ** n / (stim_contrast ** n + c50 ** n))  # hyperbolic ratio
+        if update:
+            self.resp_contrast = resp_contrast
+        return resp_contrast
 
-# class PopResponse:
-#     def __init__(self, stim_val, stim_idx, tunings, prefs_windows, prefs_all):
-#         self.stim_val = stim_val
-#         self.stim_idx = stim_idx
-#         self.tunings = tunings
-#         self.prefs_windows = prefs_windows
-#         self.prefs_all = prefs_all
-#         self.resp_tuned = None
-#         self.resp_noisy = None
-#         self.trial_prefs = None
-#         self.trial_tunings = None
-#
-#     def gen_stim_response(self):
-#         stim_val = self.stim_val
-#         stim_idx = self.stim_idx
-#         # save used window of prefs and tunings for later decoding
-#         self.trial_prefs, trial_prefs_idxs = shift_prefs(stim_val, self.prefs_all, self.prefs_windows)
-#         # tunings within prefs window for this stim_val
-#         self.trial_tunings = self.tunings[trial_prefs_idxs, :]  # save trial tunings for max likelihood
-#         # generate noiseless response from tunings
-#         self.resp_tuned = self.tunings[trial_prefs_idxs, stim_idx]
-#         # error checking that stim val is in centre of prefs window (circular tuning)
-#         if self.resp_tuned.argmax() != 87 and self.resp_tuned.argmax() != 88:
-#             print(f'stim_val not in centre of prefs window, in position {self.resp_tuned.argmax()}')
-#         # generate noisy response using poisson noise
-#         self.resp_noisy = np.random.poisson(self.resp_tuned)
-#
-#     def contrast_response(self, resp_tuned=None, stim_contrast=100, n=4, c50=15):
-#         # input all vars externally except resp_tuned
-#         # Albrecht & Hamilton (1992): n=4 c50=15
-#         # n is exponent for steepness of curve
-#         # c50 semi_saturation constant is contrast for half-max response
-#         if resp_tuned is None:
-#             resp_tuned = self.resp_tuned
-#         self.resp_tuned = resp_tuned * (stim_contrast ** n / (stim_contrast ** n + c50 ** n))  # hyperbolic ratio
-#         return self.resp_tuned
+    def get_contrast_adjusted_tunings(self, stim_con=None):
+        if stim_con is None:
+            stim_con = self.trial_stim_con
+        adjusted_tunings = []
+        all_prefs = []
+        for i_pop in self.neural_populations:
+            all_prefs = np.hstack([all_prefs, i_pop.prefs])  # use this to sort by
+            # contrast mod on each pops tunings, utilising each pops exponent and semi_sat
+            adjusted_tunings.append(self.contrast_response(i_pop.tunings, stim_contrast=stim_con,
+                                                           n=i_pop.exponent, c50=i_pop.semi_sat))
+        adjusted_tunings = np.vstack([i for i in adjusted_tunings])
+        (all_prefs, adjusted_tunings) = sort_by_standard(all_prefs, adjusted_tunings)
 
-# biggest issue with contrast_response is when to call...
-# ...if in PopResponse then require loop through all vals to apply correct n and c50
-# ...if in NeuralPopulation then require stim_val, would require all new tunings each stim
-# ...create new method in PopTuning that stores the original NeuralPopulations
-# ...then when contrast is added you can adjust tunings
+        return adjusted_tunings
 
-# class PopulationCode
-#      contains info from NeuralPopulations
-#      contains method to stack NeuralPopulations
-#      contains PopTuning
-#      contains PopResponse
+    def shift_prefs(self, stim_ori):
+        all_windows = self.all_prefs_windows
+        all_prefs = np.asarray(self.all_prefs)
+        # get central value of every possible prefs window
+        centre_vals = np.mean([all_windows.min(1), all_windows.max(1)], 0)
+        # get and use row_idx (window) where centre is closest to stim_ori
+        window_idx = abs(centre_vals - stim_ori).argmin()
+        window_vals = all_windows[window_idx, :]
+        # get range of idxs so we can index tunings array
+        min_idx = abs(all_prefs - window_vals.min()).argmin()  # start of window
+        max_idx = abs(all_prefs - window_vals.max()).argmin()  # end of window
+        window_idxs = np.arange(min_idx, max_idx + 1)  # all idxs within window
+        # assign / return
+        self.trial_prefs = window_vals
+        self.trial_prefs_idx = window_idxs
+        return window_vals, window_idxs
+
+    def gen_stim_response(self, stim_ori, stim_ori_idx=None, stim_con=100, decoder=None):
+        # assign mutable stim vals
+        self.trial_stim_ori = stim_ori
+        if stim_ori_idx is None:
+            _, stim_ori_idx = find_nearest(self.tiling, stim_ori)
+        self.trial_stim_ori_idx = stim_ori_idx
+        self.trial_stim_con = stim_con
+        # adjust tunings dependent on CRF of each pop
+        trial_tunings = self.get_contrast_adjusted_tunings()
+        # save used window of prefs and tunings for later decoding
+        trial_prefs, trial_prefs_idx = self.shift_prefs(stim_ori)
+        # tunings within prefs window for this stim_ori
+        self.trial_tunings = trial_tunings[trial_prefs_idx, :]  # save trial tunings for max likelihood
+        # generate noiseless response from tunings
+        self.resp_tuned = self.trial_tunings[:, stim_ori_idx]
+
+        # error checking that stim val is in centre of prefs window - circular tuning maintained
+        maxidx_ = (len(self.resp_tuned) - 1) / 2
+        if self.resp_tuned.argmax() != np.ceil(maxidx_):
+            if self.resp_tuned.argmax() != np.floor(maxidx_):
+                print('circular tuning failed')
+                print(f'stim_ori {stim_ori} not in centre of prefs window, in position {self.resp_tuned.argmax()}')
+
+        # generate noisy response using poisson noise
+        self.resp_noisy = np.random.poisson(self.resp_tuned)
+
+        if decoder is None:
+            pass
+        else:
+            while all(decoder != i for i in ['WTA', 'PV', 'ML']):
+                decoder = input('Input any of the following:\n\tWTA\tPV\tML')
+                if not decoder:  # if no keys entered
+                    decoder = 'WTA'
+            self.decode_response(decoder)
+        # assign
+        self.trial_prefs = trial_prefs
+        self.trial_prefs_idx = trial_prefs_idx
+        # return
+        return self.resp_noisy
+
+    def wta(self, pop_resp=None, trial_prefs=None):
+        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+        # trial_prefs: 1D prefs(vals)
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if trial_prefs is None:
+            trial_prefs = self.trial_prefs
+        trial_max = pop_resp.max()  # max response for each trial
+        ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial
+        trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax()  # idx of pref with max response
+        wta_est = trial_prefs[trial_pref_idx]
+        # which pref produced the strongest response each trial
+        return wta_est
+
+    def popvector(self, pop_resp=None, prefs=None):
+        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+        # trial_prefs: 1D prefs(vals)
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if prefs is None:
+            prefs = self.trial_prefs
+        trial_resp = pop_resp
+        cond_prefs = prefs * (np.pi / 180)  # convert to radians
+        hori = np.sum((trial_resp * np.cos(cond_prefs)))
+        vert = np.sum((trial_resp * np.sin(cond_prefs)))
+        popvector_est = (np.arctan2(vert, hori) * (180 / np.pi))  # inverse tangent in degrees
+        return popvector_est
+
+    def maxlikelihood(self, pop_resp=None, tunings=None, tiling=None):
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if tunings is None:
+            tunings = self.trial_tunings
+        if tiling is None:
+            tiling = self.tiling
+        log_tunings = np.log10(tunings)
+        log_likelihood = pop_resp.T @ log_tunings  # matrix multiplication; outputs: size=[trials, tiling]
+        max_likelihood_idx = log_likelihood.argmax()  # gives idx in feature space of ML est
+        maxlikelihood_est = (tiling[max_likelihood_idx])
+        return maxlikelihood_est
+
+    def decode_response(self, decoder='WTA'):
+        decoded_val = None
+        if decoder == 'WTA':
+            decoded_val = self.wta()
+        elif decoder == 'PV':
+            decoded_val = self.popvector()
+        elif decoder == 'ML':
+            decoded_val = self.maxlikelihood()
+        self.decoded = decoded_val
+        return decoded_val
 
 
 class Decoder:
-    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, stim_vals, tiling):
+    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, stim_oris, tiling):
         """initialise attributes of parent class"""
         self.rolling_prefs = rolling_prefs
         self.rolling_tunings = rolling_tunings
         self.resp_noisy = resp_noisy
         self.tiling = tiling
         self.decoded = {}
-        self.stim_vals = stim_vals
+        self.stim_oris = stim_oris
 
     def wta(self, pop_resp=None, trial_prefs=None):
         # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
@@ -544,37 +552,38 @@ class StaircaseHandler:
             self.level_list.append(self.current_level)
 
 
-def perform_temporal2afc(Staircase, oris, contrasts):
+def perform_2afc_ori_contrast(staircase, popcode, oris=None, contrasts=None):
+    if oris is None:
+        oris = [0]
+    if contrasts is None:
+        contrasts = [100]
     for i_ori in oris:  # loop through each standard orientation
         for i_con in contrasts:  # loop through each value of iv
-            Staircase.run_info['ori'].append(i_ori)
-            Staircase.run_info['iv'].append(i_con)
-            Staircase.continue_staircase = True
-            while Staircase.continue_staircase:
-                level = Staircase.current_level
-                StandardStim = Stimuli(stim_val=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
+            staircase.run_info['ori'].append(i_ori)
+            staircase.run_info['iv'].append(i_con)
+            staircase.continue_staircase = True
+            while staircase.continue_staircase:
+                level = staircase.current_level
+                standard = Stimuli(ori=i_ori, con=i_con, tiling=popcode.tiling)
                 if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
                     corr_ans = 'CW'
-                    ComparisonStim = Stimuli(stim_val=i_ori + level,
-                                             stim_contrast=i_con, tiling=FeatureSpace.tiling)
+                    comparison = Stimuli(ori=(standard.ori + level),
+                                         con=standard.con, tiling=popcode.tiling)
                 else:
                     corr_ans = 'CCW'
-                    ComparisonStim = Stimuli(stim_val=i_ori - level,
-                                             stim_contrast=i_con, tiling=FeatureSpace.tiling)
+                    comparison = Stimuli(ori=(standard.ori - level),
+                                         con=standard.con, tiling=popcode.tiling)
+                # generate response to stimulus ori & contrast
+                PopCode.gen_stim_response(standard.ori, standard.ori_idx, standard.con,
+                                          decoder=staircase.run_info['decoder'])
 
-                StandardResp = PopResponse(stim_val=StandardStim.stim_val, stim_idx=StandardStim.stim_idx,
-                                           tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
-                                           prefs_all=PopTuning.all_prefs)
-                StandardResp.gen_stim_response()
-                ComparisonResp = PopResponse(stim_val=ComparisonStim.stim_val, stim_idx=ComparisonStim.stim_idx,
-                                             tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
-                                             prefs_all=PopTuning.all_prefs)
-                ComparisonResp.gen_stim_response()
+                PopCode.gen_stim_response(comparison.ori, comparison.ori_idx, comparison.con,
+                                          decoder=staircase.run_info['decoder'])
 
                 StandardDecoded = Decoder(StandardResp.resp_noisy, StandardResp.trial_tunings,
-                                          StandardResp.trial_prefs, StandardStim.stim_val, FeatureSpace.tiling)
+                                          StandardResp.trial_prefs, StandardStim.stim_ori, FeatureSpace.tiling)
                 ComparisonDecoded = Decoder(ComparisonResp.resp_noisy, ComparisonResp.trial_tunings,
-                                            ComparisonResp.trial_prefs, ComparisonStim.stim_val, FeatureSpace.tiling)
+                                            ComparisonResp.trial_prefs, ComparisonStim.stim_ori, FeatureSpace.tiling)
 
                 this_ans = None  # init
                 if Staircase.run_info['decoder'][0] == 'WTA':
@@ -601,62 +610,43 @@ def perform_temporal2afc(Staircase, oris, contrasts):
                     Staircase.stop()
 
 
-cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05, 'exponent': 4, 'semi_sat': 15}
-oblique = {'sampling_freq': 2, 'sigma': 10, 'r_max': 60, 'spont': 0.05, 'exponent': 4, 'semi_sat': 15}
+# define feature space where orientations will be defined
+FeatureSpace = Tiling(min_tile=-180, max_tile=180, stepsize=0.05)
 
-ori_populations = {'vertical': NeuralPopulation(name='vertical', boundaries=get_boundaries([-90, 90], 45),
-                                                sampling_freq=cardinal['sampling_freq'], sigma=cardinal['sigma'],
-                                                spont=cardinal['spont'], r_max=cardinal['r_max']),
 
-                   'right_oblique': NeuralPopulation(name='right_oblique', boundaries=get_boundaries([-45, 135], 45),
-                                                     sampling_freq=oblique['sampling_freq'], sigma=oblique['sigma'],
-                                                     spont=oblique['spont'], r_max=oblique['r_max']),
+# initialise parameters of each ori pop
+ori_populations_info = dict(vertical={'sampling_freq': 1, 'sigma': 10, 'r_max': 60,
+                                      'boundaries': get_boundaries([-90, 90], 45),
+                                      'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'vertical'},
 
-                   'horizontal': NeuralPopulation(name='horizontal', boundaries=get_boundaries([-180, 0, 180], 45),
-                                                  sampling_freq=cardinal['sampling_freq'], sigma=cardinal['sigma'],
-                                                  spont=cardinal['spont'], r_max=cardinal['r_max']),
+                            right_oblique={'sampling_freq': 2, 'sigma': 10, 'r_max': 60,
+                                           'boundaries': get_boundaries([-45, 135], 45),
+                                           'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'right_oblique'},
 
-                   'left_oblique': NeuralPopulation(name='left_oblique', boundaries=get_boundaries([-135, 45], 45),
-                                                    sampling_freq=oblique['sampling_freq'], sigma=oblique['sigma'],
-                                                    spont=oblique['spont'], r_max=oblique['r_max']),
-                   }
+                            horizontal={'sampling_freq': 1, 'sigma': 10, 'r_max': 60,
+                                        'boundaries': get_boundaries([-180, 0, 180], 45),
+                                        'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'horizontal'},
 
-# adjust boundaries using avg sampling rates of neighbouring populations
-bounds_adjusted = adjust_boundaries(boundaries=[ori_populations[x].boundaries for x in ori_populations],
-                                    adjuster_values=adjust_adjacents(
-                                    [ori_populations[x].sampling_freq for x in ori_populations]))
-# assign adjusted boundaries to associated ori-tuned population
-for idx, ori in enumerate(ori_populations):
-    ori_populations[ori].boundaries = bounds_adjusted[idx]
+                            left_oblique={'sampling_freq': 2, 'sigma': 10, 'r_max': 60,
+                                          'boundaries': get_boundaries([-135, 45], 45),
+                                          'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'left_oblique'})
 
-# define params for tiling of extended feature space (e.g. ori is from -90 to 90, so have -180 to 180)
-FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
+ori_populations = {}
+for key in ori_populations_info:
+    ori_populations[key] = NeuralPopulation(info=ori_populations_info[key])
 
-PopTuning = PopulationTuning()  # initialise attributes in PopulationTuning
-PopCode = PopulationCode()
-for idx, ori in enumerate(ori_populations):
-    ori_populations[ori].generate_prefs(tiling=FeatureSpace.tiling)  # prefs for each ori
-    ori_populations[ori].generate_tunings(tiling=FeatureSpace.tiling)  # tunings for each ori
-    PopCode.indiv_populations.append(ori_populations[ori])
-#     PopTuning.indiv_populations.append((ori_populations[ori].prefs, ori_populations[ori].tunings))
-#     # concatenate prefs, prefs_idx, tunings
-#     PopTuning.all_prefs = np.hstack([PopTuning.all_prefs, ori_populations[ori].prefs])
-#     PopTuning.all_prefs_idx = np.hstack([PopTuning.all_prefs_idx, ori_populations[ori].prefs_idx])
-#     PopTuning.tunings.append(ori_populations[ori].tunings)
-# PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])  # concat all appended tunings
-# # sort prefs_idx and tunings by indices of prefs in ascending order
-# (PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,
-#                                                                                      PopTuning.all_prefs_idx,
-#                                                                                      PopTuning.tunings)
-# todo continue here! 28jun21
-PopCode.stack_populations()
-PopCode.rolling_window()
-# create array of all possible pref windows - switch between dependent on stim_val
-# ensures population vector is equally accurate regardless of stim_val (circular tuning)
-PopTuning.rolling_window(vector=PopTuning.all_prefs,
-                         window=PopTuning.all_prefs[(PopTuning.all_prefs >= -90) & (PopTuning.all_prefs < 90)])
+PopCode = PopulationCode(tiling=FeatureSpace.tiling,
+                         neural_populations=[ori_populations[key] for key in ori_populations])
+PopCode.adjust_boundaries()  # adjust boundaries based off average sampling rate of each neighbouring population
+# generate tunings & prefs for each pop
+PopCode.gen_tunings(stack=True, window=True)  # stack & calc rollingwindow of prefs
 
+iStim = Stimuli(-80, 50, tiling=FeatureSpace.tiling)
+PopCode.gen_stim_response(iStim.stim_ori, iStim.stim_ori_idx, iStim.stim_con)
+
+debug = 1
 # model setup is complete, can begin trials
+# define experiment params
 ori_std = [-45, 0, 45, 90]
 contrast = [2.5, 5, 10, 20, 40]
 start_val = 20
@@ -667,11 +657,8 @@ StaircasePV = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2,
 StaircaseML = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
                                n_reversals=10, revs_per_thresh=6, decoder_info='ML')
 
-
-# todo contrast response function
-
 for i_Staircase in [StaircaseWTA, StaircasePV, StaircaseML]:
-    perform_temporal2afc(i_Staircase, ori_std, contrast)  # performs staircase for every combination of conditions
+    perform_2afc_ori_contrast(i_Staircase, PopCode, ori_std, contrast)  # performs staircase for every combination of conditions
 print('debug')
 
 # todo implement contrast response function
@@ -681,29 +668,29 @@ print('debug')
 #     for i_con in contrast:  # loop through each value of iv
 #         while Staircase.continue_staircase:
 #             level = Staircase.current_level
-#             StandardStim = Stimuli(stim_val=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
+#             StandardStim = Stimuli(stim_ori=i_ori, stim_contrast=i_con, tiling=FeatureSpace.tiling)
 #             if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
 #                 corr_ans = 'CW'
-#                 ComparisonStim = Stimuli(stim_val=i_ori + level,
+#                 ComparisonStim = Stimuli(stim_ori=i_ori + level,
 #                                          stim_contrast=i_con, tiling=FeatureSpace.tiling)
 #             else:
 #                 corr_ans = 'CCW'
-#                 ComparisonStim = Stimuli(stim_val=i_ori - level,
+#                 ComparisonStim = Stimuli(stim_ori=i_ori - level,
 #                                          stim_contrast=i_con, tiling=FeatureSpace.tiling)
 #
-#             StandardResp = PopResponse(stim_val=StandardStim.stim_val, stim_idx=StandardStim.stim_idx,
-#                                        tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+#             StandardResp = PopResponse(stim_ori=StandardStim.stim_ori, stim_ori_idx=StandardStim.stim_ori_idx,
+#                                        tunings=PopTuning.tunings, prefs_windows=PopTuning.all_prefs_windows,
 #                                        prefs_all=PopTuning.all_prefs)
 #             StandardResp.gen_stim_response()
-#             ComparisonResp = PopResponse(stim_val=ComparisonStim.stim_val, stim_idx=ComparisonStim.stim_idx,
-#                                          tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+#             ComparisonResp = PopResponse(stim_ori=ComparisonStim.stim_ori, stim_ori_idx=ComparisonStim.stim_ori_idx,
+#                                          tunings=PopTuning.tunings, prefs_windows=PopTuning.all_prefs_windows,
 #                                          prefs_all=PopTuning.all_prefs)
 #             ComparisonResp.gen_stim_response()
 #
 #             StandardDecoded = Decoder(StandardResp.resp_noisy, StandardResp.trial_tunings,
-#                                       StandardResp.trial_prefs, StandardStim.stim_val, FeatureSpace.tiling)
+#                                       StandardResp.trial_prefs, StandardStim.stim_ori, FeatureSpace.tiling)
 #             ComparisonDecoded = Decoder(ComparisonResp.resp_noisy, ComparisonResp.trial_tunings,
-#                                         ComparisonResp.trial_prefs, ComparisonStim.stim_val, FeatureSpace.tiling)
+#                                         ComparisonResp.trial_prefs, ComparisonStim.stim_ori, FeatureSpace.tiling)
 #
 #             if ComparisonDecoded.wta() < StandardDecoded.wta():
 #                 this_ans = 'CCW'

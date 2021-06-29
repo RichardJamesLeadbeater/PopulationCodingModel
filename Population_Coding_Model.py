@@ -190,9 +190,9 @@ class PopulationTuning:
 def shift_prefs(stim_val, all_windows, all_values):
     # get central value of each prefs window
     centre_vals = np.mean([all_windows.min(1), all_windows.max(1)], 0)
-    # find index of centre_val(pref_window) closest to stim_val
-    window_idx = abs(centre_vals - stim_val).argmin()  # get row_idx (window) where centre_val is closest to stim_val
-    # use prefs window which has stim_val at it's centre
+    # find index of centre_val(pref_window) closest to stim_ori
+    window_idx = abs(centre_vals - stim_val).argmin()  # get row_idx (window) where centre_val is closest to stim_ori
+    # use prefs window which has stim_ori at it's centre
     window_vals = all_windows[window_idx, :]
     # get range of idxs so we can index tunings array
     min_idx = abs(all_values - window_vals.min()).argmin()  # start of window
@@ -262,13 +262,15 @@ class TrialHandler:
         resp_noiseless = []
         rolling_prefs = []
         rolling_tunings = []
+        # for idx, stim_val in enumerate(self.stim_vals):
         for idx, stim_val in enumerate(self.stim_vals):
             stim_idx = self.stim_idxs[idx]
-            prefs_window_vals, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
+            # prefs_window_vals, prefs_window_idxs = shift_prefs(stim_val, self.prefs_windows, self.prefs_all)
+            prefs_window_vals, prefs_window_idxs = shift_prefs(-80, self.prefs_windows, self.prefs_all)
             rolling_prefs.append(prefs_window_vals)  # save trial prefs window for later decoding
             rolling_tunings.append(self.tunings[prefs_window_idxs, :])  # save trial tunings for max likelihood
             noiseless = self.tunings[prefs_window_idxs, stim_idx]
-            # only use tunings within prefs window for this stim_val
+            # only use tunings within prefs window for this stim_ori
             # error checking that stim val is in centre of prefs window
             if noiseless.argmax() != 87 and noiseless.argmax() != 88:
                 print(f'stim_val not in centre of prefs window - in position {noiseless.argmax()}')
@@ -313,7 +315,7 @@ class Decoder:
         for idx in range(len(pop_resp)):
             trial_max = pop_resp[idx].max(0)  # max response for each trial (col)
             ismax = (trial_max == pop_resp[idx]).astype('int')  # bool 01 matrix of max for each trial (col)
-            trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(0)  # idx of pref (row) with max response
+            trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(0)  # idx of pref (row) with max resp
             wta_est.append(trial_prefs[idx][trial_pref_idx])
             # which pref produced the strongest response each trial
         self.decoded['wta'] = wta_est
@@ -352,8 +354,6 @@ class Decoder:
         self.decoded['ml'] = maxlikelihood_est
         return maxlikelihood_est
 
-
-# todo create Decoder as child class of TrialHandler
 
 cardinal = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
 oblique = {'sampling_freq': 1, 'sigma': 10, 'r_max': 60, 'spont': 0.05}
@@ -400,9 +400,10 @@ for idx, ori in enumerate(ori_populations):
 PopTuning.tunings = np.vstack([i for i in PopTuning.tunings])  # concat all appended tunings
 # sort prefs_idx and tunings by indices of prefs in ascending order
 (PopTuning.all_prefs, PopTuning.all_prefs_idx, PopTuning.tunings) = sort_by_standard(PopTuning.all_prefs,
-                                                                                     PopTuning.all_prefs_idx,                                                                   PopTuning.tunings)
-# create array of all possible pref windows - switch between dependent on stim_val
-# ensures population vector is equally accurate regardless of stim_val (circular tuning)
+                                                                                     PopTuning.all_prefs_idx,
+                                                                                     PopTuning.tunings)
+# create array of all possible pref windows - switch between dependent on stim_ori
+# ensures population vector is equally accurate regardless of stim_ori (circular tuning)
 PopTuning.rolling_window(vector=PopTuning.all_prefs,
                          window=PopTuning.all_prefs[(PopTuning.all_prefs >= -90) & (PopTuning.all_prefs < 90)])
 
