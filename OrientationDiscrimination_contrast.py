@@ -8,6 +8,7 @@
 # ...these values change depending upon the stimulus value;
 # ...e.g. if stimulus value == -45, the preferences used will be (-135:135)
 # ...     if stimulus value == 85, the preferences used will be (-5:175)
+import datetime
 import random
 
 import numpy as np
@@ -665,19 +666,20 @@ StaircasePV = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2,
 StaircaseML = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
                                n_reversals=10, revs_per_thresh=6, decoder_info='ML', extra_info=ori_populations_info)
 
+tstamp = datetime.datetime.now()
+tstamp = f"{tstamp.day}d{tstamp.month}m{tstamp.hour}h{tstamp.minute}min"
 for i_Staircase in [StaircaseWTA, StaircasePV, StaircaseML]:
     tic = time.time()
     # performs staircase for every combination of conditions
     perform_2afc_ori_contrast(i_Staircase, PopCode, ori_std, contrast, n_runs)
     print(f"All conditions with {i_Staircase.decoder_info}, took:\t{time.time() - tic}")
     i_Staircase.info2dframe()
-    with open("test.pkl", "wb") as file:
-        pickle.dump(i_Staircase.data, file)
-
+    with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "wb") as file:
+        pickle.dump(i_Staircase, file)
+        i_Staircase.data.to_csv(f"{i_Staircase.decoder_info}_{tstamp}_dframe.csv")
     # ensure file has saved and can be opened
-    with open("test.pkl", "rb") as file:
+    with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "rb") as file:
         test = pickle.load(file)
-
 
 print('debug')
 
