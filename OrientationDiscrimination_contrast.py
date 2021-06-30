@@ -10,7 +10,6 @@
 # ...     if stimulus value == 85, the preferences used will be (-5:175)
 import datetime
 import random
-
 import numpy as np
 from scipy.linalg import hankel
 import pandas as pd
@@ -24,10 +23,11 @@ import multiprocessing as mp
 #       - circular tuning enabled by having a moving window of prefs centred on stim_val
 #       - currently one staircase doing one run at a time (WTA: 3m47s, PV: 3m57s, ML: 5m54s)
 #               - limited by moving prefs window
-#       - with multiprocessing ((WTA + PV + ML) * 2runs: 2m12s   (data is easiest to work with)
-#                                               * 6runs: 6m01s
+#       - with multiprocessing ((WTA + PV + ML) * 2runs: 2m12s
+#                                               * 6runs: 6m01s  (on laptop takes 21m)
 #       - with multiprocessing_1cond: allconds * 2runs: 1m57s
-#                                              * 6runs: 5m54s
+#                                              * 6runs: 5m54s  (on laptop takes ?)
+# full-width half-max = 2.3548 * sigma
 
 
 def get_boundaries(mid_values, bound_range):
@@ -329,7 +329,21 @@ class PopulationCode:
         self.trial_prefs_idx = window_idxs
         return window_vals, window_idxs
 
-    def gen_stim_response(self, stim_ori, stim_ori_idx=None, stim_con=100, decoder=None):
+    def wta(self, pop_resp=None, trial_prefs=None):
+        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+        # trial_prefs: 1D prefs(vals)
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if trial_prefs is None:
+            trial_prefs = self.trial_prefs
+        trial_max = pop_resp.max()  # max response for each trial
+        ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial
+        trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax()  # idx of pref with max response
+        wta_est = trial_prefs[trial_pref_idx]
+        # which pref produced the strongest response each trial
+        return wta_est
+
+    def gen_stim_response(self, stim_ori, stim_ori_idx=None, stim_con=100, trial_decoder=None):
         # assign mutable stim vals
         self.trial_stim_ori = stim_ori
         if stim_ori_idx is None:
@@ -357,33 +371,19 @@ class PopulationCode:
         # generate noisy response using poisson noise
         self.resp_noisy = np.random.poisson(self.resp_tuned)
 
-        if decoder is None:
+        if trial_decoder is None:
             pass
         else:
-            while all(decoder != i for i in ['WTA', 'PV', 'ML']):
-                decoder = [input('Input any of the following:\n\tWTA\tPV\tML')]
-                if not decoder:  # if no keys entered
-                    decoder = ['WTA']
-            self.decode_response(decoder)
+            while all(trial_decoder != i for i in ['WTA', 'PV', 'ML']):
+                trial_decoder = [input('Input any of the following:\n\tWTA\tPV\tML')]
+                if not trial_decoder:  # if no keys entered
+                    trial_decoder = ['WTA']
+            self.decode_response(trial_decoder)
         # assign
         self.trial_prefs = trial_prefs
         self.trial_prefs_idx = trial_prefs_idx
         # return
         return self.resp_noisy
-
-    def wta(self, pop_resp=None, trial_prefs=None):
-        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
-        # trial_prefs: 1D prefs(vals)
-        if pop_resp is None:
-            pop_resp = self.resp_noisy
-        if trial_prefs is None:
-            trial_prefs = self.trial_prefs
-        trial_max = pop_resp.max()  # max response for each trial
-        ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial
-        trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax()  # idx of pref with max response
-        wta_est = trial_prefs[trial_pref_idx]
-        # which pref produced the strongest response each trial
-        return wta_est
 
     def popvector(self, pop_resp=None, prefs=None):
         # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
@@ -452,7 +452,6 @@ class StaircaseHandler:
 
     def stop(self):
         if not self.continue_staircase:
-            self.run_info['decoder'].append(self.decoder_info)
             self.run_info['threshold'].append(self.threshold)
             # reset initial values to defaults
             self.is_corr = []  # tracks n of corr answers in a row
@@ -523,72 +522,74 @@ class StaircaseHandler:
         self.data = self.data.sort_values(by=['ori', 'iv'], key=lambda x: x.map(custom_sort))
 
 
-def perform_2afc_ori_contrast(staircase, popcode, decoder=None, oris=None, contrasts=None, nruns=None):
-    if decoder is None:
-        decoder = 'WTA'
-    staircase.decoder_info = decoder
+def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, contrasts=None):
+    if decoder_id is None:
+        decoder_id = 'WTA'
+    staircase.decoder_info = decoder_id
     if oris is None:
         oris = [0]
     if contrasts is None:
         contrasts = [100]
-    if nruns is None:
-        nruns = 1
-    for i_run in range(nruns):
-        for i_ori in oris:  # loop through each standard orientation
-            for i_con in contrasts:  # loop through each value of iv
-                staircase.run_info['ori'].append(i_ori)
-                staircase.run_info['iv'].append(i_con)
-                staircase.continue_staircase = True
-                while staircase.continue_staircase:
-                    level = staircase.current_level
-                    standard = Stimuli(ori=i_ori, con=i_con, tiling=popcode.tiling)
-                    if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
-                        corr_ans = 'CW'
-                        comparison = Stimuli(ori=(standard.ori + level),
-                                             con=standard.con, tiling=popcode.tiling)
-                    else:
-                        corr_ans = 'CCW'
-                        comparison = Stimuli(ori=(standard.ori - level),
-                                             con=standard.con, tiling=popcode.tiling)
-                    # generate response to stimulus ori & contrast
-                    PopCode.gen_stim_response(standard.ori, standard.ori_idx, standard.con)
-                    standard_decoded = PopCode.decode_response(decoder=staircase.decoder_info)
-                    PopCode.gen_stim_response(comparison.ori, comparison.ori_idx, comparison.con)
-                    comparison_decoded = PopCode.decode_response(decoder=staircase.decoder_info)
+    for i_ori in oris:  # loop through each standard orientation
+        for i_con in contrasts:  # loop through each value of iv
+            staircase.run_info['ori'].append(i_ori)
+            staircase.run_info['iv'].append(i_con)
+            staircase.run_info['decoder'].append(decoder_id)
+            staircase.continue_staircase = True
+            while staircase.continue_staircase:
+                level = staircase.current_level
+                standard = Stimuli(ori=i_ori, con=i_con, tiling=popcode.tiling)
+                if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
+                    corr_ans = 'CW'
+                    comparison = Stimuli(ori=(standard.ori + level),
+                                         con=standard.con, tiling=popcode.tiling)
+                else:
+                    corr_ans = 'CCW'
+                    comparison = Stimuli(ori=(standard.ori - level),
+                                         con=standard.con, tiling=popcode.tiling)
+                # generate response to stimulus ori & contrast
+                popcode.gen_stim_response(standard.ori, standard.ori_idx, standard.con)
+                standard_decoded = popcode.decode_response(decoder=staircase.decoder_info)
+                popcode.gen_stim_response(comparison.ori, comparison.ori_idx, comparison.con)
+                comparison_decoded = popcode.decode_response(decoder=staircase.decoder_info)
 
-                    if comparison_decoded < standard_decoded:
-                        this_ans = 'CCW'
-                    else:
-                        this_ans = 'CW'
-                    staircase.is_correct(this_ans, corr_ans)  # checks if correct and updates staircase accordingly
-                    if not staircase.continue_staircase:
-                        staircase.stop()
+                if comparison_decoded < standard_decoded:
+                    this_ans = 'CCW'
+                else:
+                    this_ans = 'CW'
+                staircase.is_correct(this_ans, corr_ans)  # checks if correct and updates staircase accordingly
+                if not staircase.continue_staircase:
+                    staircase.stop()
     staircase.info2dframe()  # converts staircase information to dataframe
     return staircase
 
 
 if __name__ == '__main__':
 
+    debug = False
+    cardinal = dict(samp_freq=1, bound_range=30)
+    oblique = dict(samp_freq=2, bound_range=60)
+
     # define feature space where orientations will be defined
     FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
 
 # todo find a way to get the full width at max/sqrt(2) for comparison with previous studies (from sigma)
     # initialise parameters of each ori pop
-    ori_populations_info = dict(vertical={'sampling_freq': 1, 'sigma': 12,  # full-width half-max = 2.3548 * sigma
+    ori_populations_info = dict(vertical={'sampling_freq': cardinal['samp_freq'], 'sigma': 12,
                                           'r_max': 60,
-                                          'boundaries': get_boundaries([-90, 90], 45),
+                                          'boundaries': get_boundaries([-90, 90], cardinal['bound_range']),
                                           'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'vertical'},
 
-                                right_oblique={'sampling_freq': 2, 'sigma': 10, 'r_max': 60,
-                                               'boundaries': get_boundaries([-45, 135], 45),
+                                right_oblique={'sampling_freq': oblique['samp_freq'], 'sigma': 12, 'r_max': 60,
+                                               'boundaries': get_boundaries([-225, -45, 135], oblique['bound_range']),
                                                'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'right_oblique'},
 
-                                horizontal={'sampling_freq': 1, 'sigma': 12, 'r_max': 60,
-                                            'boundaries': get_boundaries([-180, 0, 180], 45),
+                                horizontal={'sampling_freq': cardinal['samp_freq'], 'sigma': 12, 'r_max': 60,
+                                            'boundaries': get_boundaries([-180, 0, 180], cardinal['bound_range']),
                                             'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'horizontal'},
 
-                                left_oblique={'sampling_freq': 2, 'sigma': 12, 'r_max': 60,
-                                              'boundaries': get_boundaries([-135, 45], 45),
+                                left_oblique={'sampling_freq': oblique['samp_freq'], 'sigma': 12, 'r_max': 60,
+                                              'boundaries': get_boundaries([-135, 45, 225], oblique['bound_range']),
                                               'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'left_oblique'})
 
     ori_populations = {}
@@ -604,14 +605,19 @@ if __name__ == '__main__':
     tic = time.time()
     # use multiprocessing for different decoding methods over nruns
     # define variables with which to iterate over for all possible combinations
+
     n_runs = 6
     decoder = ['WTA', 'PV', 'ML']
     # define constants which will be iterated to match n_combinations
-    Staircase = StaircaseHandler(start_level=20, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08],
+    Staircase = StaircaseHandler(start_level=20, step_sizes=[0.4, 0.35, 0.3, 0.29, 0.24, 0.17, 0.08],
                                  n_up=1, n_down=3, n_reversals=10, revs_per_thresh=6,
                                  extra_info=ori_populations_info)
     ori_std = [-45, 0, 45, 90]
     contrast = [2.5, 5, 10, 20, 40]
+
+    if debug:
+        debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
+
     # get all possible iterations / combinations of conditions for use in multiprocessing
     mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}
     for _ in range(n_runs):
@@ -637,11 +643,14 @@ if __name__ == '__main__':
     all_data = all_data.sort_values(by=['decoder', 'ori', 'iv'])
 
     output = dict(all_data=all_data, information=ori_populations_info)
+    filename = f""
     with open(f"find_a_better_way_to_name_files.pkl", "wb") as file:
         pickle.dump(output, file)
 
     with open(f"find_a_better_way_to_name_files.pkl", "rb") as file:
         test = pickle.load(file)
+
+    debug = 1
 # todo pickle all data and appropriate info
     #     with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "wb") as file:
     #         pickle.dump(i_Staircase, file)
