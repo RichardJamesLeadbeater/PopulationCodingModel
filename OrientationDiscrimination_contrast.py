@@ -650,6 +650,7 @@ if __name__ == '__main__':
     with open(f"find_a_better_way_to_name_files.pkl", "rb") as file:
         test = pickle.load(file)
 
+    # todo repeated conds in data and PV and WTA occuring in single Staircase?
     debug = 1
 # todo pickle all data and appropriate info
     #     with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "wb") as file:
