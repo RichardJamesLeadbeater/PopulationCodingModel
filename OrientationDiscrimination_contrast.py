@@ -16,6 +16,18 @@ from scipy.linalg import hankel
 import pandas as pd
 import time
 import dill as pickle
+import multiprocessing as mp
+
+
+"""Population Coding Model that performs an orientation discrimination two-alternative forced-choice task"""
+# notes:
+#       - circular tuning enabled by having a moving window of prefs centred on stim_val
+#       - currently one staircase doing one run at a time (WTA: 3m47s, PV: 3m57s, ML: 5m54s)
+#               - limited by moving prefs window
+#       - with multiprocessing ((WTA + PV + ML) * 2runs: 2m12s   (data is easiest to work with)
+#                                               * 6runs: 6m01s
+#       - with multiprocessing_1cond: allconds * 2runs: 1m57s
+#                                              * 6runs: 5m54s
 
 
 def get_boundaries(mid_values, bound_range):
@@ -67,13 +79,6 @@ def generate_gaussian(x, mu, sigma):
     p2 = sigma * np.sqrt(2 * np.pi)
     tunings = np.exp(p1) / p2
     return tunings
-
-
-class Params:
-    """attribute store"""
-
-    def __init__(self):
-        pass
 
 
 class Tiling:
@@ -278,9 +283,9 @@ class PopulationCode:
         if window:
             self.rolling_window()
 
-    def contrast_response(self, resp_tuned=None, stim_contrast=100, n=4, c50=15):
+    def contrast_response(self, resp_tuned=None, stim_contrast=100, n=3.4, c50=24):
         # input all vars externally except resp_tuned
-        # Albrecht & Hamilton (1992): n=4 c50=15
+        # Albrecht & Hamilton (1992): n=3.4 c50=24
         # n is exponent for steepness of curve
         # c50 semi_saturation constant is contrast for half-max response
         update = False
@@ -419,68 +424,10 @@ class PopulationCode:
         return decoded_val
 
 
-class Decoder:
-    def __init__(self, resp_noisy, rolling_tunings, rolling_prefs, stim_oris, tiling):
-        """initialise attributes of parent class"""
-        self.rolling_prefs = rolling_prefs
-        self.rolling_tunings = rolling_tunings
-        self.resp_noisy = resp_noisy
-        self.tiling = tiling
-        self.decoded = {}
-        self.stim_oris = stim_oris
-
-    def wta(self, pop_resp=None, trial_prefs=None):
-        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
-        # trial_prefs: 1D prefs(vals)
-        if pop_resp is None:
-            pop_resp = self.resp_noisy
-        if trial_prefs is None:
-            trial_prefs = self.rolling_prefs
-
-        trial_max = pop_resp.max()  # max response for each trial
-        ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial
-        trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax()  # idx of pref with max response
-        wta_est = trial_prefs[trial_pref_idx]
-        # which pref produced the strongest response each trial
-        self.decoded['wta'] = wta_est
-
-        return wta_est
-
-    def popvector(self, pop_resp=None, rolling_prefs=None):
-        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
-        # trial_prefs: 1D prefs(vals)
-        if pop_resp is None:
-            pop_resp = self.resp_noisy
-        if rolling_prefs is None:
-            rolling_prefs = self.rolling_prefs
-        trial_resp = pop_resp
-        cond_prefs = rolling_prefs * (np.pi / 180)  # convert to radians
-        hori = np.sum((trial_resp * np.cos(cond_prefs)))
-        vert = np.sum((trial_resp * np.sin(cond_prefs)))
-        popvector_est = (np.arctan2(vert, hori) * (180 / np.pi))  # inverse tangent in degrees
-        self.decoded['pv'] = popvector_est
-        return popvector_est
-
-    def maxlikelihood(self, pop_resp=None, rolling_tunings=None, tiling=None):
-        if pop_resp is None:
-            pop_resp = self.resp_noisy
-        if rolling_tunings is None:
-            rolling_tunings = self.rolling_tunings
-        if tiling is None:
-            tiling = self.tiling
-        log_tunings = np.log10(rolling_tunings)
-        log_likelihood = pop_resp.T @ log_tunings  # matrix multiplication; outputs: size=[trials, tiling]
-        max_likelihood_idx = log_likelihood.argmax()  # gives idx in feature space of ML est
-        maxlikelihood_est = (tiling[max_likelihood_idx])
-        self.decoded['ml'] = maxlikelihood_est
-        return maxlikelihood_est
-
-
 class StaircaseHandler:
-    def __init__(self, start_level, step_sizes, n_up, n_down, n_reversals, revs_per_thresh, decoder_info,
+    def __init__(self, start_level, step_sizes, n_up, n_down, n_reversals, revs_per_thresh, decoder_info=None,
                  max_level=None, current_level=None, extra_info=None):
         self.revs_per_thresh = revs_per_thresh
-        self.decoder_info = decoder_info
         self.n_down = n_down
         self.n_up = n_up
         self.n_reversals = n_reversals
@@ -498,7 +445,8 @@ class StaircaseHandler:
         self.reversals = []
         self.continue_staircase = True
         self.threshold = []
-        self.run_info = {'decoder': [], 'ori': [], 'iv': [], 'threshold': []}  # for use w/ external function
+        self.decoder_info = decoder_info
+        self.run_info = {'decoder': [], 'ori': [], 'iv': [], 'threshold': []}  # appends during runs
         self.data = None
         self.extra_info = extra_info  # to be added externally when saving to pkl
 
@@ -575,14 +523,17 @@ class StaircaseHandler:
         self.data = self.data.sort_values(by=['ori', 'iv'], key=lambda x: x.map(custom_sort))
 
 
-def perform_2afc_ori_contrast(staircase, popcode, oris=None, contrasts=None, n_runs=None):
+def perform_2afc_ori_contrast(staircase, popcode, decoder=None, oris=None, contrasts=None, nruns=None):
+    if decoder is None:
+        decoder = 'WTA'
+    staircase.decoder_info = decoder
     if oris is None:
         oris = [0]
     if contrasts is None:
         contrasts = [100]
-    if n_runs is None:
-        n_runs = 1
-    for i_run in range(n_runs):
+    if nruns is None:
+        nruns = 1
+    for i_run in range(nruns):
         for i_ori in oris:  # loop through each standard orientation
             for i_con in contrasts:  # loop through each value of iv
                 staircase.run_info['ori'].append(i_ori)
@@ -612,99 +563,89 @@ def perform_2afc_ori_contrast(staircase, popcode, oris=None, contrasts=None, n_r
                     staircase.is_correct(this_ans, corr_ans)  # checks if correct and updates staircase accordingly
                     if not staircase.continue_staircase:
                         staircase.stop()
+    staircase.info2dframe()  # converts staircase information to dataframe
+    return staircase
 
 
-# define feature space where orientations will be defined
-FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
+if __name__ == '__main__':
 
+    # define feature space where orientations will be defined
+    FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
 
-# initialise parameters of each ori pop
-ori_populations_info = dict(vertical={'sampling_freq': 1, 'sigma': 10, 'r_max': 60,
-                                      'boundaries': get_boundaries([-90, 90], 45),
-                                      'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'vertical'},
+# todo find a way to get the full width at max/sqrt(2) for comparison with previous studies (from sigma)
+    # initialise parameters of each ori pop
+    ori_populations_info = dict(vertical={'sampling_freq': 1, 'sigma': 12,  # full-width half-max = 2.3548 * sigma
+                                          'r_max': 60,
+                                          'boundaries': get_boundaries([-90, 90], 45),
+                                          'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'vertical'},
 
-                            right_oblique={'sampling_freq': 2, 'sigma': 10, 'r_max': 60,
-                                           'boundaries': get_boundaries([-45, 135], 45),
-                                           'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'right_oblique'},
+                                right_oblique={'sampling_freq': 2, 'sigma': 10, 'r_max': 60,
+                                               'boundaries': get_boundaries([-45, 135], 45),
+                                               'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'right_oblique'},
 
-                            horizontal={'sampling_freq': 1, 'sigma': 10, 'r_max': 60,
-                                        'boundaries': get_boundaries([-180, 0, 180], 45),
-                                        'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'horizontal'},
+                                horizontal={'sampling_freq': 1, 'sigma': 12, 'r_max': 60,
+                                            'boundaries': get_boundaries([-180, 0, 180], 45),
+                                            'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'horizontal'},
 
-                            left_oblique={'sampling_freq': 2, 'sigma': 10, 'r_max': 60,
-                                          'boundaries': get_boundaries([-135, 45], 45),
-                                          'spont': 0.05, 'exponent': 4, 'semi_sat': 15, 'name': 'left_oblique'})
+                                left_oblique={'sampling_freq': 2, 'sigma': 12, 'r_max': 60,
+                                              'boundaries': get_boundaries([-135, 45], 45),
+                                              'spont': 0.05, 'exponent': 3.4, 'semi_sat': 24, 'name': 'left_oblique'})
 
-ori_populations = {}
-for key in ori_populations_info:
-    ori_populations[key] = NeuralPopulation(info=ori_populations_info[key])
+    ori_populations = {}
+    for key in ori_populations_info:
+        ori_populations[key] = NeuralPopulation(info=ori_populations_info[key])
 
-PopCode = PopulationCode(tiling=FeatureSpace.tiling,
-                         neural_populations=[ori_populations[key] for key in ori_populations])
-PopCode.adjust_boundaries()  # adjust boundaries based off average sampling rate of each neighbouring population
-# generate tunings & prefs for each pop
-PopCode.gen_tunings(stack=True, window=True)  # stack & calc rollingwindow of prefs
+    PopCode = PopulationCode(tiling=FeatureSpace.tiling,
+                             neural_populations=[ori_populations[key] for key in ori_populations])
+    PopCode.adjust_boundaries()  # adjust boundaries based off average sampling rate of each neighbouring population
+    # generate tunings & prefs for each pop
+    PopCode.gen_tunings(stack=True, window=True)  # stack & calc rollingwindow of prefs
 
-# model setup is complete, can begin trials
-# define experiment params
-# exp_conds = {'ori_std': [-45, 0, 45, 90],
-#              'contrast': [2.5, 5, 10, 20, 40]}
-# custom_sort = {}
-# for i_categ in exp_conds:
-#     for idx, cond in enumerate(exp_conds[i_categ]):
-#         custom_sort[cond] = idx
-# raw_data = raw_data.sort_values(by=['participant', 'orientation', iv],
-#                                 key=lambda x: x.map(custom_sort))
-ori_std = [-45, 0, 45, 90]
-contrast = [2.5, 5, 10, 20, 40]
-start_val = 20
-n_runs = 6
-StaircaseWTA = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
-                                n_reversals=10, revs_per_thresh=6, decoder_info='WTA', extra_info=ori_populations_info)
-StaircasePV = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
-                               n_reversals=10, revs_per_thresh=6, decoder_info='PV', extra_info=ori_populations_info)
-StaircaseML = StaircaseHandler(start_level=start_val, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08], n_up=1, n_down=3,
-                               n_reversals=10, revs_per_thresh=6, decoder_info='ML', extra_info=ori_populations_info)
-
-tstamp = datetime.datetime.now()
-tstamp = f"{tstamp.day}d{tstamp.month}m{tstamp.hour}h{tstamp.minute}min"
-for i_Staircase in [StaircaseWTA, StaircasePV, StaircaseML]:
     tic = time.time()
-    # performs staircase for every combination of conditions
-    perform_2afc_ori_contrast(i_Staircase, PopCode, ori_std, contrast, n_runs)
-    print(f"All conditions with {i_Staircase.decoder_info}, took:\t{time.time() - tic}")
-    i_Staircase.info2dframe()
-    with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "wb") as file:
-        pickle.dump(i_Staircase, file)
-        i_Staircase.data.to_csv(f"{i_Staircase.decoder_info}_{tstamp}_dframe.csv")
-    # ensure file has saved and can be opened
-    with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "rb") as file:
+    # use multiprocessing for different decoding methods over nruns
+    # define variables with which to iterate over for all possible combinations
+    n_runs = 6
+    decoder = ['WTA', 'PV', 'ML']
+    # define constants which will be iterated to match n_combinations
+    Staircase = StaircaseHandler(start_level=20, step_sizes=[0.6, 0.4, 0.2, 0.1, 0.08],
+                                 n_up=1, n_down=3, n_reversals=10, revs_per_thresh=6,
+                                 extra_info=ori_populations_info)
+    ori_std = [-45, 0, 45, 90]
+    contrast = [2.5, 5, 10, 20, 40]
+    # get all possible iterations / combinations of conditions for use in multiprocessing
+    mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}
+    for _ in range(n_runs):
+        for i_decoder in decoder:
+            mp_iters['decoder'].append(i_decoder)
+            mp_iters['ori_std'].append(ori_std)
+            mp_iters['contrast'].append(contrast)
+            mp_iters['popcode'].append(PopCode)
+            mp_iters['staircase'].append(Staircase)
+
+    # make sure n_iters is equal for all params to be used in function
+    # each decoder across all cond combos for n_runs
+    with mp.Pool() as pool:
+        mp_data = pool.starmap(perform_2afc_ori_contrast, zip(mp_iters['staircase'], mp_iters['popcode'],
+                                                              mp_iters['decoder'], mp_iters['ori_std'],
+                                                              mp_iters['contrast']))
+        pool.close()
+        pool.join()
+
+    print(f"Multiprocessing of 3 staircases for {n_runs} runs each took:\n\t{(time.time() - tic):.2f} secs")
+
+    all_data = pd.concat([i.data for i in mp_data])
+    all_data = all_data.sort_values(by=['decoder', 'ori', 'iv'])
+
+    output = dict(all_data=all_data, information=ori_populations_info)
+    with open(f"find_a_better_way_to_name_files.pkl", "wb") as file:
+        pickle.dump(output, file)
+
+    with open(f"find_a_better_way_to_name_files.pkl", "rb") as file:
         test = pickle.load(file)
-
-print('debug')
-
 # todo pickle all data and appropriate info
-
-# Stimuli
-# -	Contrast (constant)
-# -	Orientation (change each loop in staircase)
-# - Two intervals
-
-# Staircase
-# -	Set initial oridiff value.
-# -	Change step size on each reversal
-# -	Decision stage
-# o	Decoded_1 < Decoded_2; n_corr += 1
-# -	3 down 1 up
-# o	if n_corr == 3; ori -= stepsize[i]
-#
-# Neural Population
-# -	Contrast response function
-# -	Density
-# -	Tuning
-# -	Max response
-#
-# Decoders
-# -	WTA
-# -	PV
-# -	ML
+    #     with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "wb") as file:
+    #         pickle.dump(i_Staircase, file)
+    #         i_Staircase.data.to_csv(f"{i_Staircase.decoder_info}_{tstamp}_dframe.csv")
+    #     # ensure file has saved and can be opened
+    #     with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "rb") as file:
+    #         test = pickle.load(file)

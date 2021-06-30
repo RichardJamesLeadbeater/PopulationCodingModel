@@ -244,7 +244,7 @@ def adjust_boundaries(boundaries, adjuster_values):
 
 
 # todo create trial handler class which can store data from multiple runs
-class TrialHandler:
+class PopulationResponse:
     def __init__(self, n_trials, stim_vals, stim_idxs, tunings, prefs_windows, prefs_all):
         self.n_trials = n_trials
         self.prefs_windows = prefs_windows
@@ -315,6 +315,7 @@ class Decoder:
         for idx in range(len(pop_resp)):
             trial_max = pop_resp[idx].max(0)  # max response for each trial (col)
             ismax = (trial_max == pop_resp[idx]).astype('int')  # bool 01 matrix of max for each trial (col)
+            # if two prefs with max response, randomly choose
             trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(0)  # idx of pref (row) with max resp
             wta_est.append(trial_prefs[idx][trial_pref_idx])
             # which pref produced the strongest response each trial
@@ -415,9 +416,9 @@ PopTuning.rolling_window(vector=PopTuning.all_prefs,
 # get idx of min and max of pref_window, in all_prefs - index with these values
 # loop through each stimulus:
 
-PopResponse = TrialHandler(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim.stim_indices,
-                           tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
-                           prefs_all=PopTuning.all_prefs)
+PopResponse = PopulationResponse(n_trials=10, stim_vals=Stim.stim_vals, stim_idxs=Stim.stim_indices,
+                                 tunings=PopTuning.tunings, prefs_windows=PopTuning.window_prefs,
+                                 prefs_all=PopTuning.all_prefs)
 PopResponse.run()
 
 Decoded = Decoder(resp_noisy=PopResponse.resp_noisy, rolling_tunings=PopResponse.rolling_tunings,
