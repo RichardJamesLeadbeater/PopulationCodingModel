@@ -56,6 +56,57 @@ def custom_sort_dframe(dframe, custom_order):
     return output_dframe
 
 
+def plot_dframe_mp(dframe, title_cond, iv1, iv2, measure, title, savepath):
+    for i in
+    pass
+
+
+def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath):
+
+    plot_data = dframe.copy()  # preserve original
+
+    vals = [title_cond[0], iv1[0], iv2[0]]
+    slice = (title_cond[1], iv1[1], iv2[1])  # which conds to plot
+    label = (title_cond[2], iv1[2], iv2[2])
+
+    # create constant indices for consistent use in function
+    tit_idx = 0
+    iv1_idx = 1
+    iv2_idx = 2
+
+    # index vals to be plotted... important to keep all vals of iv determines color wheel
+    plot_vals = [title_cond[tit_idx], vals[iv1_idx][slice[iv1_idx]], vals[iv2_idx][slice[iv2_idx]]]
+
+    sns.set_theme()
+    sns.set_context('paper')
+    color_palette = sns.color_palette('colorblind', len(vals[iv1_idx]))
+    color_palette = color_palette[slice[iv1_idx]]
+    color_order = vals[iv1_idx]
+    color_order = color_order[slice[iv1_idx]]
+
+    # creates dataframe made up of only values for plotting
+    plot_data = pd.concat(plot_data[(plot_data[label[tit_idx]] == x)] for x in plot_vals[tit_idx])
+    plot_data = pd.concat(plot_data[(plot_data[label[iv1_idx]] == x)] for x in plot_vals[iv1_idx])
+    plot_data = pd.concat(plot_data[(plot_data[label[iv2_idx]] == x)] for x in plot_vals[iv2_idx])
+
+    for i_title_cond in plot_data[label[tit_idx]].unique():
+        i_dframe = plot_data[(plot_data[label[tit_idx]] == i_title_cond)].copy()  # plot dframe for all title conds
+        i_bar = sns.catplot(x=label[iv2_idx], y=measure,
+                            hue=label[iv1_idx], hue_order=color_order, kind='bar', legend=False,
+                            errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8],
+                            data=i_dframe, ci=95, n_boot=2000, palette=color_palette)
+        i_bar.set(xlabel=label[iv2_idx], ylabel=measure)
+        i_bar.ax.set(title=label[tit_idx].upper())
+        # i_bar.ax.set_ylim(bottom=0, top=4.2)
+        # set legend ppts: note that bbox_to_anchor is used in conjunction with loc(default='best')
+        i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
+                        edgecolor='1', labelspacing=.65)
+        i_bar.tight_layout()
+        i_bar.fig.set(dpi=400, size_inches=(10, 5))
+        i_bar.savefig(os.path.join(savepath, f"{title}_{i_title_cond}.png"))
+        plt.close()
+
+
 def plot_graph_save(dframe, x, y, hue, hue_order, palette, img_name, plotname):
     bar = sns.catplot(x=x, y=y, hue=hue, hue_order=hue_order, kind='bar', legend=False,
                       errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8],
@@ -85,16 +136,16 @@ os.chdir(data_path)  # change directory to open files
 infosets = []
 datasets = []
 
-dframe_orders = dict(decoder=['WTA', 'PV', 'ML'],
-                     ori=['horizontal', 'vertical', 'minus45', 'plus45', 'cardinal', 'oblique'],
-                     contrast=['2.5', '5.0', '10.0', '20.0', '40.0'])
+ivs = dict(decoder=['WTA', 'PV', 'ML'],
+           ori=['horizontal', 'vertical', 'minus45', 'plus45', 'cardinal', 'oblique'],
+           contrast=['2.5', '5.0', '10.0', '20.0', '40.0'])
 
 for i_file in os.listdir():
     if i_file.split('.')[-1] == 'pkl':
         i_condcombo = i_file.split('.')[0]
-        i_path = os.path.join(graph_path, i_condcombo)
-        if not os.path.exists(i_path):
-            os.makedirs(i_path)
+        i_graph_path = os.path.join(graph_path, i_condcombo)
+        if not os.path.exists(i_graph_path):
+            os.makedirs(i_graph_path)
         with open(i_file, "rb") as input_file:
             i_pkl = pickle.load(input_file)
         i_info = i_pkl['information']
@@ -103,63 +154,18 @@ for i_file in os.listdir():
         i_data = change_dframe_labels(i_data, 'ori', [-45, 0, 45, 90],  # replace old labels with new ones
                                       ['minus45', 'vertical', 'plus45', 'horizontal'])
         i_data = change_dframe_col_name(i_data, 'iv', 'contrast')  # more appropriate col name
-        i_data = custom_sort_dframe(i_data, dframe_orders)  # custom sort for plotting with seaborn
-        print('ho')
-os.chdir(og_path)  # back to original path
+        i_data = change_dframe_labels(i_data, 'contrast', list(i_data['contrast'].unique()),
+                                      i_data['contrast'].unique().astype(str))
+        i_data = custom_sort_dframe(i_data, ivs)  # custom sort for plotting with seaborn
 
+        plot_dframe_mp(i_data, title_cond=[ivs['decoder'], slice(0, len(ivs['decoder'])), 'decoder'],
+                       iv1=[ivs['ori'], slice(4, 6), 'ori'],
+                       iv2=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'], measure='threshold',
+                       title=f"{i_condcombo}", savepath=i_graph_path)
 
-#  density = [1, 1/1.5, 1/2, 1/2.5, 1/3]
-#  fwhm = [50, 45, 40, 35, 30]
-#  bounds = [[45, 45], [30, 60], [20, 70]]
-#  conds - all(j == i for i in [vertical, horizontal] for j in D]
-density = []
-
-sns.set_theme()
-sns.set_context('paper')
-color_palette = sns.color_palette('colorblind', 6)
-color_order = ['horizontal', 'vertical', 'minus45', 'plus45', 'cardinal', 'oblique']
-plot_data = dataset.copy()
-
-if which_graph == 'raw':
-    orientation = 'orientation'
-    measure = 'threshold'
-    z = 'participant'
-else:
-    orientation = 'ori'
-    measure = 'mean'
-    z = iv
-
-all_oris = (dataset,
-            'all', color_order, color_palette)
-std_oris = (dataset[(dataset[orientation] != 'cardinal') & (dataset[orientation] != 'oblique')],
-            'oris', color_order[0:4], color_palette[0:4])
-cvso = (dataset[(dataset[orientation] == 'cardinal') | (dataset[orientation] == 'oblique')],
-        'cvso', color_order[4:6], color_palette[4:6])
-hvo = (dataset[(dataset[orientation] != 'cardinal') | (dataset[orientation] == 'oblique')],
-       'hvo', color_order[0:2] + color_order[5:6], color_palette[0:2] + color_palette[5:6])
-plot_info = [all_oris, std_oris, cvso, hvo]
-
-for i_info in plot_info:
-    if which_graph == 'summary':
-        plot_graph_save(i_info[0], x=iv, y=measure, hue=orientation, hue_order=i_info[2],
-                        palette=i_info[3], img_name=i_info[1], plotname='all_observers')
-    elif which_graph == 'raw':
-        for name in plot_data[z].unique():
-            i_data = i_info[0]
-            i_data = i_data[(i_data[z] == name)]
-            i_bar = sns.catplot(x=iv, y=measure,
-                                hue=orientation, hue_order=i_info[2], kind='bar', legend=False,
-                                errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8],
-                                data=i_data, ci=95, n_boot=2000, palette=i_info[3])
-            i_bar.set(xlabel=iv, ylabel=measure)
-            i_bar.ax.set(title=name.upper())
-            # i_bar.ax.set_ylim(bottom=0, top=4.2)
-            # set legend ppts: note that bbox_to_anchor is used in conjunction with loc(default='best')
-            i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
-                            edgecolor='1', labelspacing=.65)
-            i_bar.tight_layout()
-            i_bar.fig.set(dpi=400, size_inches=(10, 5))
-            i_bar.savefig(os.path.join(graph_path, f"{i_info[1]}_{exp_name}_{name}.png"))
-            plt.close()
+        plot_dframe(i_data, title_cond=[ivs['decoder'], slice(0, len(ivs['decoder'])), 'decoder'],
+                    iv1=[ivs['ori'], slice(4, 6), 'ori'],
+                    iv2=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'], measure='threshold',
+                    title=f"{i_condcombo}", savepath=i_graph_path)
 
 print('debug')

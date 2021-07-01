@@ -590,20 +590,23 @@ if __name__ == '__main__':
 
     debug = False
 
-    density = [1, 1/1.5, 1/2, 1/2.5, 1/3]
-    fwhm = [50, 45, 40, 35, 30]
-    bounds = [[45, 45], [30, 60], [20, 70]]
-    # create idcs to be used in filename
-    d = 3
-    t = 3
-    b = 2
+    density_1 = [1, 1 / 1.5, 1 / 2, 1 / 2.5, 1 / 3, 1 / 3.5, 1 / 4]
+    density_2 = [1, 1.5, 2, 2.5, 3, 3.5, 4]
+    fwhm_1 = [50, 45, 40, 35, 30, 25, 20]
+    fwhm_2 = [50, 55, 60, 65, 70, 75, 80]
+    bounds_1 = [[45, 45], [30, 60], [20, 70], [10, 80]]
 
-    cardinal = Params(sampling_density=density[0], sampling_range=bounds[b-1][0], tuning_fwhm=fwhm[t-1])
-    oblique = Params(sampling_density=density[d-1], sampling_range=bounds[b-1][1], tuning_fwhm=fwhm[0])
+    # create idcs to be used in filename
+    d_1 = 7
+    t_1 = 7
+    b_1 = 1
+
+    cardinal = Params(sampling_density=density_1[0], sampling_range=bounds_1[b_1 - 1][0], tuning_fwhm=fwhm_1[t_1 - 1])
+    oblique = Params(sampling_density=density_1[d_1 - 1], sampling_range=bounds_1[b_1 - 1][1], tuning_fwhm=fwhm_1[0])
 
     shared = Params(r_max=60, spont=0.05, exponent=3.4, semi_sat=24)
 
-    filename = f"B{b}_D{d}_T{t}"
+    filename = f"B{b_1}_D{d_1}_T{t_1}"
     og_path = os.getcwd()
     data_path = os.path.join(og_path, 'data')
     if not os.path.exists(data_path):
