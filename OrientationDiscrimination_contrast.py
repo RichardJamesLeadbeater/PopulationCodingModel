@@ -597,7 +597,7 @@ if __name__ == '__main__':
     bounds_1 = [[45, 45], [30, 60], [20, 70], [10, 80]]
 
     # create idcs to be used in filename
-    d_1 = 7
+    d_1 = 1
     t_1 = 7
     b_1 = 1
 
