@@ -113,7 +113,8 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
                         errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8], sharey=True,
                         data=plot_data, ci=95, n_boot=2000, palette=color_palette,
                         col=label[tit_idx])
-    i_bar.set(xlabel=label[iv2_idx], ylim=(0, 18))
+    # i_bar.set(xlabel=label[iv2_idx], ylim=(0, 18))
+    i_bar.set(xlabel=label[iv2_idx], ylim=(0, 2))
     i_bar.set_titles(col_template="{col_name}")
     i_bar.set_ylabels(measure, size=labelsize)
     i_bar.set_xlabels(label[iv2_idx], size=labelsize)
@@ -127,8 +128,8 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
     i_bar.add_legend(fontsize=labelsize)
     # i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
     #                     edgecolor='1', labelspacing=.65)
-    # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
-    i_bar.savefig(os.path.join(savepath, f"{title}.png"))
+    i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
+    # i_bar.savefig(os.path.join(savepath, f"{title}.png"))
     plt.close()
 
 
