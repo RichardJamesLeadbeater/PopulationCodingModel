@@ -150,6 +150,8 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
 #     plt.close()
 
 
+my_ylim = 2
+
 og_path = os.getcwd()
 data_path = os.path.join(og_path, 'data')
 graph_path = os.path.join(og_path, 'graphs')
@@ -187,8 +189,9 @@ for i_file in os.listdir():
         plot_dframe(i_data, title_cond=[ivs['decoder'], slice(0, len(ivs['decoder'])), 'decoder'],
                     iv1=[ivs['ori'], slice(4, 6), 'ori'],
                     iv2=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'], measure='threshold',
-                    title=f"{i_condcombo}", savepath=i_graph_path,
+                    savepath=i_graph_path,
+                    title=f"{i_condcombo}_{my_ylim}ylim",
                     forprinting=True,
-                    ylimit=18)  # forprinting sets to monochrome
+                    ylimit=my_ylim)  # forprinting sets to monochrome
 
 print('debug')
