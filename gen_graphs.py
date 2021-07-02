@@ -56,7 +56,7 @@ def custom_sort_dframe(dframe, custom_order):
     return output_dframe
 
 
-def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprinting=False):
+def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprinting=False, ylimit=18):
 
     plot_data = dframe.copy()  # preserve original
 
@@ -114,7 +114,7 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
                         data=plot_data, ci=95, n_boot=2000, palette=color_palette,
                         col=label[tit_idx])
     # i_bar.set(xlabel=label[iv2_idx], ylim=(0, 18))
-    i_bar.set(xlabel=label[iv2_idx], ylim=(0, 2))
+    i_bar.set(xlabel=label[iv2_idx], ylim=(0, ylimit))
     i_bar.set_titles(col_template="{col_name}")
     i_bar.set_ylabels(measure, size=labelsize)
     i_bar.set_xlabels(label[iv2_idx], size=labelsize)
@@ -128,8 +128,8 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
     i_bar.add_legend(fontsize=labelsize)
     # i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
     #                     edgecolor='1', labelspacing=.65)
-    i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
-    # i_bar.savefig(os.path.join(savepath, f"{title}.png"))
+    # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
+    i_bar.savefig(os.path.join(savepath, f"{title}.png"))
     plt.close()
 
 
@@ -188,6 +188,7 @@ for i_file in os.listdir():
                     iv1=[ivs['ori'], slice(4, 6), 'ori'],
                     iv2=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'], measure='threshold',
                     title=f"{i_condcombo}", savepath=i_graph_path,
-                    forprinting=True)  # forprinting sets to monochrome
+                    forprinting=True,
+                    ylimit=18)  # forprinting sets to monochrome
 
 print('debug')
