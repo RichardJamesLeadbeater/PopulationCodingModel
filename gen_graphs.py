@@ -129,25 +129,10 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
     # i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
     #                     edgecolor='1', labelspacing=.65)
     # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
-    i_bar.savefig(os.path.join(savepath, f"{title}.png"))
+    i_bar.savefig(os.path.join(savepath, f"{title}_lin.png"))
+    i_bar.set(yscale='log')
+    i_bar.savefig(os.path.join(savepath, f"{title}_log.png"))
     plt.close()
-
-
-# def plot_graph_save(dframe, x, y, hue, hue_order, palette, img_name, plotname):
-#     bar = sns.catplot(x=x, y=y, hue=hue, hue_order=hue_order, kind='bar', legend=False,
-#                       errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8],
-#                       data=dframe, ci=95, n_boot=2000, palette=palette)
-#     bar.set(xlabel=iv, ylabel=measure)
-#     bar.ax.set(title=plotname.upper())
-#     # if any(i == name for i in ['rjl']):
-#     #     i_bar.ax.set_ylim(bottom=0, top=0.05)
-#     # set legend ppts: note that bbox_to_anchor is used in conjunction with loc(default='best')
-#     bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=bar.ax.get_facecolor(),
-#                   edgecolor='1', labelspacing=.65)
-#     bar.tight_layout()
-#     bar.fig.set(dpi=400, size_inches=(10, 5))
-#     bar.savefig(os.path.join(graph_path, f"{img_name}_{exp_name}_{plotname}.png"))
-#     plt.close()
 
 
 my_ylim = 2

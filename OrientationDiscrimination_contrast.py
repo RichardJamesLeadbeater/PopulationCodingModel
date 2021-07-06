@@ -606,7 +606,10 @@ if __name__ == '__main__':
 
     shared = Params(r_max=60, spont=0.05, exponent=3.4, semi_sat=24)
 
-    filename = f"B{b_1}_D{d_1}_T{t_1}"
+    contrasts = [2.5, 5, 10, 20, 40]
+    # contrasts = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
+
+    filename = f"B{b_1}_D{d_1}_T{t_1}_{len(contrasts)}cons"
     og_path = os.getcwd()
     data_path = os.path.join(og_path, 'data')
     if not os.path.exists(data_path):
@@ -672,11 +675,11 @@ if __name__ == '__main__':
     n_runs = 6
     decoder = ['WTA', 'PV', 'ML']
     # define constants which will be iterated to match n_combinations
-    Staircase = StaircaseHandler(start_level=20, step_sizes=[0.4, 0.35, 0.3, 0.29, 0.24, 0.17, 0.08],
+    Staircase = StaircaseHandler(start_level=20, step_sizes=[0.4, 0.3, 0.24, 0.2, 0.17, 0.13, 0.08],
                                  n_up=1, n_down=3, n_reversals=10, revs_per_thresh=6,
                                  extra_info=ori_populations_info)
     ori_std = [-45, 0, 45, 90]
-    contrast = [2.5, 5, 10, 20, 40]
+    contrast = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
 
     if debug:
         debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
