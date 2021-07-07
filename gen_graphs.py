@@ -56,7 +56,32 @@ def custom_sort_dframe(dframe, custom_order):
     return output_dframe
 
 
-def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprinting=False, ylimit=18):
+def load_seaborn_prefs(style="ticks", context="talk"):
+    axes_color = [0.2, 0.2, 0.2, 0.95]
+    sns.set_theme(style=style, context=context,
+                  rc={'axes.edgecolor': axes_color, 'xtick.color': axes_color, 'ytick.color': axes_color,
+                      'axes.linewidth': 1, 'legend.title_fontsize': 0, 'legend.fontsize': 13, 'patch.linewidth': 1.2,
+                      'xtick.major.width': 1, 'xtick.minor.width': 1, 'ytick.major.width': 1, 'ytick.minor.width': 1}
+                  )
+
+
+def get_ylim_logscale(dframe, dframe_dv='mean'):
+    # auto log scale for facetgrid can cut off smallest values, this puts ylim to suitable range
+    logscale_minval = dframe[dframe_dv].min() * (10 ** dframe[dframe_dv].min())
+    # leave default to auto_val (None)
+    if 1 > logscale_minval >= 0.1:
+        log_ymin = 0.1  # if in range of 0.1 to 1 then set min to 0.1
+    elif 0.1 > logscale_minval >= 0.01:
+        log_ymin = 0.01
+    elif 0.01 > logscale_minval >= 0.001:
+        log_ymin = 0.001
+    else:
+        log_ymin = None
+    return log_ymin, None
+
+
+def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprinting=False,
+                ylim_lin=18, ylim_log=0.01):
 
     plot_data = dframe.copy()  # preserve original
 
@@ -72,9 +97,9 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
     # index vals to be plotted... important to keep all vals of iv determines color wheel
     plot_vals = [title_cond[tit_idx], vals[iv1_idx][slice[iv1_idx]], vals[iv2_idx][slice[iv2_idx]]]
 
-    sns.set_theme(context='paper', style="whitegrid", font_scale=1.2,
-                  rc={"axes.labelsize": 19})
-    labelsize = 12
+    # sns.set_theme(set_themecontext='paper', style="whitegrid", font_scale=1.2,
+    #               rc={"axes.labelsize": 19})
+    # labelsize = 12
 
     if forprinting:
         color_palette = [[0.2, 0.2, 0.2], [0.8, 0.8, 0.8]]
@@ -89,55 +114,32 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
     plot_data = pd.concat(plot_data[(plot_data[label[iv1_idx]] == x)] for x in plot_vals[iv1_idx])
     plot_data = pd.concat(plot_data[(plot_data[label[iv2_idx]] == x)] for x in plot_vals[iv2_idx])
 
-    # for idx, i_title_cond in enumerate(plot_data[label[tit_idx]].unique()):
-    #     i_dframe = plot_data[(plot_data[label[tit_idx]] == i_title_cond)].copy()  # plot dframe for all title conds
-    #     i_bar = sns.catplot(x=label[iv2_idx], y=measure,
-    #                         hue=label[iv1_idx], hue_order=color_order, kind='bar', legend=False,
-    #                         errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8],
-    #                         data=i_dframe, ci=95, n_boot=2000, palette=color_palette,
-    #                         col='decoder')
-    #     i_bar.set(title=i_title_cond.upper(), xlabel=label[iv2_idx], ylabel=measure)
-    #     # i_bar.ax.set_ylim(bottom=0, top=4.2)
-    #     # set legend ppts: note that bbox_to_anchor is used in conjunction with loc(default='best')
-    #     i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
-    #                     edgecolor='1', labelspacing=.65)
-    #     i_bar.tight_layout()
-    #     i_bar.fig.set(dpi=400, size_inches=(10, 5))
-    #     i_bar.savefig(os.path.join(savepath, f"{title}_{i_title_cond}.png"))
-    #     plt.close()
-    # i_dframe = plot_data[(plot_data[label[tit_idx]] == i_title_cond)].copy()  # plot dframe for all title conds
-
+    load_seaborn_prefs()
     # plots multiple plots on facegrid for each col (title_cond)
     i_bar = sns.catplot(x=label[iv2_idx], y=measure,
-                        hue=label[iv1_idx], hue_order=color_order, kind='bar', legend=False,
+                        hue=label[iv1_idx], hue_order=color_order, kind='bar', legend_out=True,
                         errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8], sharey=True,
                         data=plot_data, ci=95, n_boot=2000, palette=color_palette,
-                        col=label[tit_idx])
+                        col=label[tit_idx], col_wrap=3)
     # i_bar.set(xlabel=label[iv2_idx], ylim=(0, 18))
-    i_bar.set(xlabel=label[iv2_idx], ylim=(0, ylimit))
-    i_bar.set_titles(col_template="{col_name}")
-    i_bar.set_ylabels(measure, size=labelsize)
-    i_bar.set_xlabels(label[iv2_idx], size=labelsize)
-    # i_bar.ax.set_ylim(bottom=0, top=4.2)
-    # set legend ppts: note that bbox_to_anchor is used in conjunction with loc(default='best')
-    # i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
-    #                 edgecolor='1', labelspacing=.65)
+    i_bar.set_titles(col_template="{col_name}", y=.96, size=13, weight='bold')
+    i_bar.set_ylabels(measure)
+    i_bar.set_xlabels(label[iv2_idx])
+    i_bar.fig.subplots_adjust(wspace=0.16, hspace=0.17)
+
     i_bar.tight_layout()
-    i_bar.fig.subplots_adjust(wspace=0.09)
-    i_bar.fig.set(dpi=500, size_inches=(10, 5))
-    i_bar.add_legend(fontsize=labelsize)
-    # i_bar.ax.legend(loc='upper right', bbox_to_anchor=(1.15, 0.75), facecolor=i_bar.ax.get_facecolor(),
-    #                     edgecolor='1', labelspacing=.65)
+    i_bar.fig.set(dpi=500)
     # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
     i_bar.savefig(os.path.join(savepath, f"{title}_lin.png"))
-    i_bar.set(yscale='log')
+    i_bar.set(yscale='log', ylim=ylim_log)
     i_bar.savefig(os.path.join(savepath, f"{title}_log.png"))
     plt.close()
 
 
-my_ylim = 2
+my_ylim = None
 
 og_path = os.getcwd()
+summary_path = os.path.join(og_path, 'summary')
 data_path = os.path.join(og_path, 'data')
 graph_path = os.path.join(og_path, 'graphs')
 for i_path in [data_path, graph_path]:
@@ -154,13 +156,21 @@ ivs = dict(decoder=['WTA', 'PV', 'ML'],
            contrast=['2.5', '5.0', '10.0', '20.0', '40.0'])
 
 for i_file in os.listdir():
-    if i_file.split('.')[-1] == 'pkl':
-        i_condcombo = i_file.split('.')[0]
-        i_graph_path = os.path.join(graph_path, i_condcombo)
+    if i_file.split('.')[-1] != 'pkl':
+        continue
+    else:
+        i_condition = i_file.split('.')[0]
+        i_graph_path = os.path.join(graph_path, i_condition)
         if not os.path.exists(i_graph_path):
             os.makedirs(i_graph_path)
         with open(i_file, "rb") as input_file:
-            i_pkl = pickle.load(input_file)
+            try:
+                i_pkl = pickle.load(input_file)
+            except:
+                print(f"File failed to be unpickled:  {i_file}")
+                continue
+            else:
+                pass
         i_info = i_pkl['information']
         i_data = i_pkl['all_data']
         i_data = add_cardinal_and_oblique(i_data)  # append cardinal and oblique collapsed conditions
@@ -171,12 +181,16 @@ for i_file in os.listdir():
                                       i_data['contrast'].unique().astype(str))
         i_data = custom_sort_dframe(i_data, ivs)  # custom sort for plotting with seaborn
 
+        i_summary = pd.read_pickle(os.path.join(summary_path, f"{i_condition}_allsummary.pkl"))
+
         plot_dframe(i_data, title_cond=[ivs['decoder'], slice(0, len(ivs['decoder'])), 'decoder'],
                     iv1=[ivs['ori'], slice(4, 6), 'ori'],
                     iv2=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'], measure='threshold',
                     savepath=i_graph_path,
-                    title=f"{i_condcombo}_{my_ylim}ylim",
-                    forprinting=True,
-                    ylimit=my_ylim)  # forprinting sets to monochrome
+                    title=f"{i_condition}_{my_ylim}ylim",
+                    forprinting=False,
+                    ylim_log=get_ylim_logscale(i_summary, 'threshold'))  # forprinting sets to monochrome
+
+
 
 print('debug')
