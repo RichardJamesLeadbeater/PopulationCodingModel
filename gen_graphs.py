@@ -122,11 +122,14 @@ def plot_dframe(dframe, title_cond, iv1, iv2, measure, title, savepath, forprint
                         data=plot_data, ci=95, n_boot=2000, palette=color_palette,
                         col=label[tit_idx], col_wrap=3)
     # i_bar.set(xlabel=label[iv2_idx], ylim=(0, 18))
-    i_bar.set_titles(col_template="{col_name}", y=.96, size=13, weight='bold')
+    i_bar.set_titles(col_template="{col_name}", y=.96, size=16, weight='bold')
     i_bar.set_ylabels(measure)
     i_bar.set_xlabels(label[iv2_idx])
-    i_bar.fig.subplots_adjust(wspace=0.16, hspace=0.17)
-
+    for j in i_bar.axes.flatten():
+        j.tick_params(labelleft=True)
+        j.set_yticklabels(j.get_yticklabels(), size=13)
+        j.set_xticklabels(j.get_xticklabels(), size=13)
+    i_bar.fig.subplots_adjust(wspace=0.18, hspace=0.20)
     i_bar.tight_layout()
     i_bar.fig.set(dpi=500)
     # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
@@ -190,7 +193,5 @@ for i_file in os.listdir():
                     title=f"{i_condition}_{my_ylim}ylim",
                     forprinting=False,
                     ylim_log=get_ylim_logscale(i_summary, 'threshold'))  # forprinting sets to monochrome
-
-
 
 print('debug')
