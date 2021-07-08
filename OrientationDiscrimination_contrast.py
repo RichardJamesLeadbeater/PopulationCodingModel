@@ -598,7 +598,7 @@ if __name__ == '__main__':
 
     # create idcs to be used in filename
     d_1 = 1
-    t_1 = 7
+    t_1 = 1
     b_1 = 1
 
     cardinal = Params(sampling_density=density_1[0], sampling_range=bounds_1[b_1 - 1][0], tuning_fwhm=fwhm_1[t_1 - 1])
