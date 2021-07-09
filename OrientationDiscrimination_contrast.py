@@ -590,135 +590,141 @@ if __name__ == '__main__':
 
     debug = False
 
-    density_1 = [1, 1 / 1.5, 1 / 2, 1 / 2.5, 1 / 3, 1 / 3.5, 1 / 4]
-    density_2 = [1, 1.5, 2, 2.5, 3, 3.5, 4]
-    fwhm_1 = [50, 45, 40, 35, 30, 25, 20]
-    fwhm_2 = [50, 55, 60, 65, 70, 75, 80]
-    bounds_1 = [[45, 45], [30, 60], [20, 70], [10, 80]]
+    # all possible params
+    density_1 = [1, 1/1.5, 1/2, 1/2.5, 1/3, 1/3.5, 1/4, 1/4.5, 1/5, 1/5.5]
+    fwhm_1 = [50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
+    bounds_1 = [[45, 45], [30, 60], [20, 70], [10, 80], [5, 85]]
+    rmax_1 = [120, 60, 30]
 
     # create idcs to be used in filename
-    d_1 = 1
-    t_1 = 1
-    b_1 = 1
+    i_d = 1
+    i_t = 1
+    i_b = 1
+    i_f = 1
+    # loop_conds[0] = i_d   loop_conds[1] = i_t   loop_conds[2] = t_2
 
-    cardinal = Params(sampling_density=density_1[0], sampling_range=bounds_1[b_1 - 1][0], tuning_fwhm=fwhm_1[t_1 - 1])
-    oblique = Params(sampling_density=density_1[d_1 - 1], sampling_range=bounds_1[b_1 - 1][1], tuning_fwhm=fwhm_1[0])
+    d = [1, 7, 10]  # sampling density of obliques
+    t = [1, 7, 10]  # tuning width fwhm
+    b = [1, 3]  # boundary
+    f = [1, 2, 3]  # firing rate
 
-    shared = Params(r_max=60, spont=0.05, exponent=3.4, semi_sat=24)
+    test = []
+    # get all possible combos of idcs for each paramater
+    all_combos = [[d_, t_, b_, f_] for d_ in d for t_ in t for b_ in b for f_ in f]
+    for combo in all_combos:
+        i_d = combo[0]
+        i_t = combo[1]
+        i_b = combo[2]
+        i_f = combo[3]
 
-    contrasts = [2.5, 5, 10, 20, 40]
-    # contrasts = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
+        cardinal = Params(sampling_density=density_1[0], sampling_range=bounds_1[i_b - 1][0], tuning_fwhm=fwhm_1[i_t - 1])
+        oblique = Params(sampling_density=density_1[i_d - 1], sampling_range=bounds_1[i_b - 1][1], tuning_fwhm=fwhm_1[0])
 
-    filename = f"B{b_1}_D{d_1}_T{t_1}_{len(contrasts)}cons"
-    og_path = os.getcwd()
-    data_path = os.path.join(og_path, 'data')
-    if not os.path.exists(data_path):
-        os.makedirs('data')
+        shared = Params(r_max=rmax_1[i_f - 1], spont=0.05, exponent=3.4, semi_sat=14)
 
-    # define feature space where orientations will be defined
-    FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
+        contrasts = [2.5, 5, 10, 20, 40]
+        n_runs = 6
+        # contrasts = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
 
+        filename = f"B{i_b}_D{i_d}_T{i_t}_F{i_f}_{len(contrasts)}cons_{n_runs}runs_semisat{shared.semi_sat}"
+        og_path = os.getcwd()
+        data_path = os.path.join(og_path, 'data')
+        if not os.path.exists(data_path):
+            os.makedirs('data')
 
-# todo find a way to get the full width at max/sqrt(2) for comparison with previous studies (from sigma)
-    # initialise parameters of each ori pop
-    ori_populations_info = dict(vertical={'sampling_freq': 1 / cardinal.sampling_density,
-                                          'tuning_fwhm': cardinal.tuning_fwhm,
-                                          'boundaries': get_boundaries(0, cardinal.sampling_range),
-                                          'r_max': shared.r_max,
-                                          'spont': shared.spont,
-                                          'exponent': shared.exponent,
-                                          'semi_sat': shared.semi_sat,
-                                          'name': 'vertical'},
+        # define feature space where orientations will be defined
+        FeatureSpace = Tiling(min_tile=-270, max_tile=270, stepsize=0.05)
 
-                                right_oblique={'sampling_freq': 1 / oblique.sampling_density,
-                                               'tuning_fwhm': oblique.tuning_fwhm,
-                                               'boundaries': get_boundaries(45, oblique.sampling_range),
-                                               'r_max': shared.r_max,
-                                               'spont': shared.spont,
-                                               'exponent': shared.exponent,
-                                               'semi_sat': shared.semi_sat,
-                                               'name': 'right_oblique'},
-
-                                horizontal={'sampling_freq': 1 / cardinal.sampling_density,
-                                            'tuning_fwhm': cardinal.tuning_fwhm,
-                                            'boundaries': get_boundaries(90, cardinal.sampling_range),
-                                            'r_max': shared.r_max,
-                                            'spont': shared.spont,
-                                            'exponent': shared.exponent,
-                                            'semi_sat': shared.semi_sat,
-                                            'name': 'horizontal'},
-
-                                left_oblique={'sampling_freq': 1 / oblique.sampling_density,
-                                              'tuning_fwhm': oblique.tuning_fwhm,
-                                              'boundaries': get_boundaries(-45, oblique.sampling_range),
+        # todo find a way to get the full width at max/sqrt(2) for comparison with previous studies (from sigma)
+        # initialise parameters of each ori pop
+        ori_populations_info = dict(vertical={'sampling_freq': 1 / cardinal.sampling_density,
+                                              'tuning_fwhm': cardinal.tuning_fwhm,
+                                              'boundaries': get_boundaries(0, cardinal.sampling_range),
                                               'r_max': shared.r_max,
                                               'spont': shared.spont,
                                               'exponent': shared.exponent,
                                               'semi_sat': shared.semi_sat,
-                                              'name': 'left_oblique'}
-                                )
+                                              'name': 'vertical'},
 
-    ori_populations = {}
-    for key in ori_populations_info:
-        ori_populations[key] = NeuralPopulation(info=ori_populations_info[key])
+                                    right_oblique={'sampling_freq': 1 / oblique.sampling_density,
+                                                   'tuning_fwhm': oblique.tuning_fwhm,
+                                                   'boundaries': get_boundaries(45, oblique.sampling_range),
+                                                   'r_max': shared.r_max,
+                                                   'spont': shared.spont,
+                                                   'exponent': shared.exponent,
+                                                   'semi_sat': shared.semi_sat,
+                                                   'name': 'right_oblique'},
 
-    PopCode = PopulationCode(tiling=FeatureSpace.tiling,
-                             neural_populations=[ori_populations[key] for key in ori_populations])
-    PopCode.adjust_boundaries()  # adjust boundaries based off average sampling rate of each neighbouring population
-    # generate tunings & prefs for each pop
-    PopCode.gen_tunings(stack=True, window=True)  # stack & calc rollingwindow of prefs
+                                    horizontal={'sampling_freq': 1 / cardinal.sampling_density,
+                                                'tuning_fwhm': cardinal.tuning_fwhm,
+                                                'boundaries': get_boundaries(90, cardinal.sampling_range),
+                                                'r_max': shared.r_max,
+                                                'spont': shared.spont,
+                                                'exponent': shared.exponent,
+                                                'semi_sat': shared.semi_sat,
+                                                'name': 'horizontal'},
 
-    tic = time.time()
-    # use multiprocessing for different decoding methods over nruns
-    # define variables with which to iterate over for all possible combinations
+                                    left_oblique={'sampling_freq': 1 / oblique.sampling_density,
+                                                  'tuning_fwhm': oblique.tuning_fwhm,
+                                                  'boundaries': get_boundaries(-45, oblique.sampling_range),
+                                                  'r_max': shared.r_max,
+                                                  'spont': shared.spont,
+                                                  'exponent': shared.exponent,
+                                                  'semi_sat': shared.semi_sat,
+                                                  'name': 'left_oblique'}
+                                    )
 
-    n_runs = 6
-    decoder = ['WTA', 'PV', 'ML']
-    # define constants which will be iterated to match n_combinations
-    Staircase = StaircaseHandler(start_level=20, step_sizes=[0.4, 0.3, 0.24, 0.2, 0.17, 0.13, 0.08],
-                                 n_up=1, n_down=3, n_reversals=10, revs_per_thresh=6,
-                                 extra_info=ori_populations_info)
-    ori_std = [-45, 0, 45, 90]
-    contrast = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
+        ori_populations = {}
+        for key in ori_populations_info:
+            ori_populations[key] = NeuralPopulation(info=ori_populations_info[key])
 
-    if debug:
-        debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
-    else:
-        # get all possible iterations / combinations of conditions for use in multiprocessing
-        mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}
-        for _ in range(n_runs):
-            for i_decoder in decoder:
-                mp_iters['decoder'].append(i_decoder)
-                mp_iters['ori_std'].append(ori_std)
-                mp_iters['contrast'].append(contrast)
-                mp_iters['popcode'].append(PopCode)
-                mp_iters['staircase'].append(Staircase)
+        PopCode = PopulationCode(tiling=FeatureSpace.tiling,
+                                 neural_populations=[ori_populations[key] for key in ori_populations])
+        PopCode.adjust_boundaries()  # adjust boundaries based off average sampling rate of each neighbouring population
+        # generate tunings & prefs for each pop
+        PopCode.gen_tunings(stack=True, window=True)  # stack & calc rollingwindow of prefs
 
-        # make sure n_iters is equal for all params to be used in function
-        # each decoder across all cond combos for n_runs
-        with mp.Pool() as pool:
-            mp_data = pool.starmap(perform_2afc_ori_contrast, zip(mp_iters['staircase'], mp_iters['popcode'],
-                                                                  mp_iters['decoder'], mp_iters['ori_std'],
-                                                                  mp_iters['contrast']))
-            pool.close()
-            pool.join()
+        tic = time.time()
+        # use multiprocessing for different decoding methods over nruns
+        # define variables with which to iterate over for all possible combinations
 
-        print(f"Multiprocessing of 3 staircases for {n_runs} runs each took:\n\t{(time.time() - tic):.2f} secs")
+        decoder = ['WTA', 'PV', 'ML']
+        # define constants which will be iterated to match n_combinations (stepsize has huge influence on stair time)
+        Staircase = StaircaseHandler(start_level=20, step_sizes=[0.6, 0.3, 0.25, 0.2, 0.19, 0.18, 0.17, 0.16],
+                                     n_up=1, n_down=3, n_reversals=8, revs_per_thresh=4,
+                                     extra_info=ori_populations_info)
+        ori_std = [-45, 0, 45, 90]
+        n_runs = n_runs
+        contrast = contrasts
 
-        all_data = pd.concat([i.data for i in mp_data])
-        all_data = all_data.sort_values(by=['decoder', 'ori', 'iv'])
+        if debug:
+            debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
+        else:
+            # get all possible iterations / combinations of conditions for use in multiprocessing
+            mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}
+            for _ in range(n_runs):
+                for i_decoder in decoder:
+                    mp_iters['decoder'].append(i_decoder)
+                    mp_iters['ori_std'].append(ori_std)
+                    mp_iters['contrast'].append(contrast)
+                    mp_iters['popcode'].append(PopCode)
+                    mp_iters['staircase'].append(Staircase)
 
-        output = dict(all_data=all_data, information=ori_populations_info)
+            # make sure n_iters is equal for all params to be used in function
+            # each decoder across all cond combos for n_runs
+            with mp.Pool() as pool:
+                mp_data = pool.starmap(perform_2afc_ori_contrast, zip(mp_iters['staircase'], mp_iters['popcode'],
+                                                                      mp_iters['decoder'], mp_iters['ori_std'],
+                                                                      mp_iters['contrast']))
+                pool.close()
+                pool.join()
 
-        with open(os.path.join(data_path, f"{filename}.pkl"), "wb") as file:
-            pickle.dump(output, file)
+            print(f">>> Condition complete: {filename}\n\t...time taken =\n\t\t{(time.time() - tic):.2f} secs")
 
-    # todo repeated conds in data and PV and WTA occuring in single Staircase?
-    print('hi')
-# todo pickle all data and appropriate info
-    #     with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "wb") as file:
-    #         pickle.dump(i_Staircase, file)
-    #         i_Staircase.data.to_csv(f"{i_Staircase.decoder_info}_{tstamp}_dframe.csv")
-    #     # ensure file has saved and can be opened
-    #     with open(f"{i_Staircase.decoder_info}_{tstamp}.pkl", "rb") as file:
-    #         test = pickle.load(file)
+            all_data = pd.concat([i.data for i in mp_data])
+            all_data = all_data.sort_values(by=['decoder', 'ori', 'iv'])
+
+            output = dict(all_data=all_data, information=ori_populations_info)
+
+            with open(os.path.join(data_path, f"{filename}.pkl"), "wb") as file:
+                pickle.dump(output, file)
