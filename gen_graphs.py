@@ -123,7 +123,7 @@ def plot_dframe(dframe, measure, title_cond, iv1, iv2=None, title=None, savepath
         i_bar = sns.catplot(x=label[iv2_idx], y=measure,
                         hue=label[iv1_idx], hue_order=color_order, kind='bar', legend_out=True,
                         errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8], sharey=True,
-                        data=plot_data, ci=95, n_boot=2000, palette=color_palette,
+                        data=plot_data, ci='sd', palette=color_palette,
                         col=label[tit_idx], col_wrap=3)
     else:
         i_bar = sns.catplot(x=label[iv1_idx], y=measure,

@@ -385,11 +385,9 @@ class PopulationCode:
         maxidx_ = (len(self.resp_tuned) - 1) / 2
         if self.resp_tuned.argmax() != np.ceil(maxidx_):
             if self.resp_tuned.argmax() != np.floor(maxidx_):
-                print('circular tuning failed')
-                print(f'stim_ori {stim_ori} not in centre of prefs window, in position {self.resp_tuned.argmax()}')
-                if stim_ori < 90:
-                    print('hi')
-                debug = 1
+                print(f'circular tuning failed')
+                print(f'stim_ori {stim_ori} not in centre of prefs window, in position {self.resp_tuned.argmax()}\n')
+
         # generate noisy response using poisson noise
         self.resp_noisy = np.random.poisson(self.resp_tuned)
 
@@ -603,12 +601,13 @@ if __name__ == '__main__':
     i_f = 1
     # loop_conds[0] = i_d   loop_conds[1] = i_t   loop_conds[2] = t_2
 
-    d = [1, 7, 10]  # sampling density of obliques
-    t = [1, 7, 10]  # tuning width fwhm
-    b = [1, 3]  # boundary
-    f = [1, 2, 3]  # firing rate
+    d = [1, 5, 9]  # sampling density of obliques
+    t = [1, 4, 7]  # tuning width fwhm
+    b = [1]  # boundary
+    f = [2]  # firing rate  (Shen et al., 2014)
 
     test = []
+    counter = 0
     # get all possible combos of idcs for each paramater
     all_combos = [[d_, t_, b_, f_] for d_ in d for t_ in t for b_ in b for f_ in f]
     for combo in all_combos:
@@ -622,8 +621,8 @@ if __name__ == '__main__':
 
         shared = Params(r_max=rmax_1[i_f - 1], spont=0.05, exponent=3.4, semi_sat=14)
 
-        contrasts = [2.5, 5, 10, 20, 40]
-        n_runs = 6
+        contrasts = [2.5, 5, 10, 20, 40, 80]
+        n_runs = 30
         # contrasts = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
 
         filename = f"B{i_b}_D{i_d}_T{i_t}_F{i_f}_{len(contrasts)}cons_{n_runs}runs_semisat{shared.semi_sat}"
@@ -691,7 +690,7 @@ if __name__ == '__main__':
         decoder = ['WTA', 'PV', 'ML']
         # define constants which will be iterated to match n_combinations (stepsize has huge influence on stair time)
         Staircase = StaircaseHandler(start_level=20, step_sizes=[0.6, 0.3, 0.25, 0.2, 0.19, 0.18, 0.17, 0.16],
-                                     n_up=1, n_down=3, n_reversals=8, revs_per_thresh=4,
+                                     n_up=1, n_down=3, n_reversals=8, revs_per_thresh=5,
                                      extra_info=ori_populations_info)
         ori_std = [-45, 0, 45, 90]
         n_runs = n_runs
@@ -728,3 +727,6 @@ if __name__ == '__main__':
 
             with open(os.path.join(data_path, f"{filename}.pkl"), "wb") as file:
                 pickle.dump(output, file)
+
+            counter += 1
+            print(f"{counter} down, {36 - counter} to go!")

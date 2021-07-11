@@ -4,9 +4,11 @@ import scipy.stats as st
 import mytools
 
 
-def to_csv_pkl(dframe, folder, title, rnd=2):
-    dframe.round(rnd).to_csv(os.path.join(folder, f"{title}.csv"))
-    dframe.to_pickle(os.path.join(folder, f"{title}.pkl"))
+def to_csv_pkl(dframe, folder, title, rnd=2, pkl=True, csv=False):
+    if csv:
+        dframe.round(rnd).to_csv(os.path.join(folder, f"{title}.csv"))
+    if pkl:
+        dframe.to_pickle(os.path.join(folder, f"{title}.pkl"))
 
 
 og_path = os.getcwd()
