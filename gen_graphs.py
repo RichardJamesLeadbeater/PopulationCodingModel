@@ -83,10 +83,10 @@ def get_ylim_logscale(dframe, dframe_dv='mean'):
 def plot_dframe(dframe, measure, title_cond, iv1, iv2=None, title=None, savepath=None, forprinting=False,
                 ylim_lin=18, ylim_log=0.01):
 
-    plot_data = dframe.copy()  # preserve original
+    data_plot = dframe.copy()  # preserve original
 
     vals = [title_cond[0], iv1[0]]
-    slice = [title_cond[1], iv1[1]]  # which conds to plot
+    slicer = [title_cond[1], iv1[1]]  # which conds to plot
     label = [title_cond[2], iv1[2]]
 
     # create constant indices for consistent use in function
@@ -94,67 +94,79 @@ def plot_dframe(dframe, measure, title_cond, iv1, iv2=None, title=None, savepath
     iv1_idx = 1
 
     # index vals to be plotted... but still retain all vals of iv as it determines color wheel
-    plot_vals = [title_cond[tit_idx], vals[iv1_idx][slice[iv1_idx]]]
+    plot_vals = [title_cond[tit_idx], vals[iv1_idx][slicer[iv1_idx]]]
 
     if iv2:
         vals.append(iv2[0])
-        slice.append(iv2[1])
+        slicer.append(iv2[1])
         label.append(iv2[2])
         iv2_idx = 2
-        plot_vals.append(vals[iv2_idx][slice[iv2_idx]])
+        plot_vals.append(vals[iv2_idx][slicer[iv2_idx]])
 
     if forprinting:
-        color_palette = [[0.2, 0.2, 0.2], [0.8, 0.8, 0.8]]  # b&w
+        colour_palette = [[0.2, 0.2, 0.2], [0.8, 0.8, 0.8]]  # b&w
     else:
-        color_palette = sns.color_palette('colorblind', len(vals[iv1_idx]))
-        color_palette = color_palette[slice[iv1_idx]]
-    color_order = vals[iv1_idx]
-    color_order = color_order[slice[iv1_idx]]
+        colour_palette = sns.color_palette('colorblind', len(vals[iv1_idx]))
+        colour_palette = colour_palette[slicer[iv1_idx]]
+    colour_order = vals[iv1_idx]
+    colour_order = colour_order[slicer[iv1_idx]]
 
     # creates dataframe made up of only values for plotting
-    plot_data = pd.concat(plot_data[(plot_data[label[tit_idx]] == x)] for x in plot_vals[tit_idx])
-    plot_data = pd.concat(plot_data[(plot_data[label[iv1_idx]] == x)] for x in plot_vals[iv1_idx])
+    data_plot = pd.concat(data_plot[(data_plot[label[tit_idx]] == x)] for x in plot_vals[tit_idx])
+    data_plot = pd.concat(data_plot[(data_plot[label[iv1_idx]] == x)] for x in plot_vals[iv1_idx])
     if iv2:
-        plot_data = pd.concat(plot_data[(plot_data[label[iv2_idx]] == x)] for x in plot_vals[iv2_idx])
+        data_plot = pd.concat(data_plot[(data_plot[label[iv2_idx]] == x)] for x in plot_vals[iv2_idx])
 
-    load_seaborn_prefs()
     # plots multiple plots on facegrid for each col (title_cond)
     if iv2:
         i_bar = sns.catplot(x=label[iv2_idx], y=measure,
-                        hue=label[iv1_idx], hue_order=color_order, kind='bar', legend_out=True,
-                        errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8], sharey=True,
-                        data=plot_data, ci='sd', palette=color_palette,
+                        hue=label[iv1_idx], hue_order=colour_order, kind='bar', legend=False,
+                        errwidth=1.2, capsize=.04, errcolor=[.2, .2, .2, 0.8],
+                        sharey=True, sharex=True,
+                        data=data_plot, ci=68, palette=colour_palette,
                         col=label[tit_idx], col_wrap=3)
     else:
         i_bar = sns.catplot(x=label[iv1_idx], y=measure,
                             kind='point', legend_out=True, sharey=True,
-                            data=plot_data, ci=None, color=[0.2, 0.2, 0.2, 0.5],
+                            data=data_plot, ci=None, color=[0.2, 0.2, 0.2, 0.5],
                             col=label[tit_idx], col_wrap=3)
 
     # i_bar.set(xlabel=label[iv2_idx], ylim=(0, 18))
-    i_bar.set_titles(col_template="{col_name}", y=.98, size=16, weight='bold')
-    i_bar.set_ylabels(measure)
+    i_bar.set_titles(col_template="{col_name}", y=.98, size=title_size, weight='bold')
+    i_bar.set_ylabels(measure, size=label_size)
     if iv2:
-        i_bar.set_xlabels(label[iv2_idx])
+        i_bar.set_xlabels(label[iv2_idx], size=label_size)
     else:
-        i_bar.set_xlabels(label[iv1_idx])
+        i_bar.set_xlabels(label[iv1_idx], size=label_size)
     for j in i_bar.axes.flatten():
-        j.tick_params(labelleft=True)
-        j.set_yticklabels(j.get_yticklabels(), size=13)
-        j.set_xticklabels(j.get_xticklabels(), size=13)
-    i_bar.fig.subplots_adjust(wspace=0.18, hspace=0.20)
+        j.tick_params(labelleft=True, labelbottom=True)
+        j.set_yticklabels(j.get_yticklabels(), size=tick_size)
+        j.set_xticklabels(j.get_xticklabels(), size=tick_size)
+    i_bar.fig.subplots_adjust(wspace=width_space, hspace=height_space)
+    i_bar.add_legend(fontsize=legend_fontsize)
     i_bar.tight_layout()
     i_bar.fig.set(dpi=250)
     # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
     i_bar.savefig(os.path.join(savepath, f"{title}_lin.png"))
     i_bar.set(yscale='log', ylim=ylim_log)
+    for j in i_bar.axes.flatten():
+            j.tick_params(labelleft=True, labelbottom=True, which='both')
+            j.set_yticklabels(j.get_yticklabels(), size=tick_size, minor=True)
+            j.set_xticklabels(j.get_xticklabels(), size=tick_size)
     i_bar.savefig(os.path.join(savepath, f"{title}_log.png"))
     plt.close()
 
-
 # START
 my_ylim = None
-
+load_seaborn_prefs()
+legend_fontsize = 18
+label_size = 18
+tick_size = 15
+title_size = 19
+width_space = .2
+height_space = .3
+lin_ymin = 0.0
+lin_ymax = None
 og_path = os.getcwd()
 summary_path = os.path.join(og_path, 'summary')
 data_path = os.path.join(og_path, 'data')
@@ -170,7 +182,7 @@ datasets = []
 
 ivs = dict(decoder=['WTA', 'PV', 'ML'],
            ori=['horizontal', 'vertical', 'minus45', 'plus45', 'cardinal', 'oblique'],
-           contrast=['2.5', '5.0', '10.0', '20.0', '40.0'])
+           contrast=['2.5', '5.0', '10.0', '20.0', '40.0', '80.0'])
 
 for i_file in os.listdir():
     if i_file.split('.')[-1] != 'pkl':
@@ -204,30 +216,6 @@ for i_file in os.listdir():
                     iv1=[ivs['ori'], slice(4, 6), 'ori'],
                     iv2=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'], measure='threshold',
                     savepath=i_graph_path,
-                    title=f"{i_condition}_{my_ylim}ylim",
+                    title=f"{i_condition}",
                     forprinting=False,
                     ylim_log=get_ylim_logscale(i_summary, 'threshold'))  # forprinting sets to monochrome
-
-        # create oblique index graphs
-        # create oblique index graphs
-        plot_data_oi = {'decoder': [], 'contrast': [], 'oblique index': [], 'ori': []}
-        for i_decoder in i_data['decoder'].unique():
-            for i_con in i_data['contrast'].unique():
-                j_data = i_data[(i_data['decoder'] == i_decoder) & (i_data['contrast'] == i_con)]
-                cardinal = j_data[(j_data['ori'] == 'cardinal')]['threshold'].mean()
-                oblique = j_data[(j_data['ori'] == 'oblique')]['threshold'].mean()
-
-                plot_data_oi['decoder'].append(i_decoder)
-                plot_data_oi['contrast'].append(i_con)
-                plot_data_oi['oblique index'].append(oblique / cardinal)
-                plot_data_oi['ori'].append(None)  # not used but need col for custom sort
-        plot_data_oi = pd.DataFrame(plot_data_oi)
-        plot_data_oi = custom_sort_dframe(plot_data_oi, ivs)
-
-        plot_dframe(plot_data_oi, title_cond=[ivs['decoder'], slice(0, len(ivs['decoder'])), 'decoder'],
-                    iv1=[ivs['contrast'], slice(0, len(ivs['contrast'])), 'contrast'],
-                    measure='oblique index',
-                    savepath=i_graph_path,
-                    title=f"{i_condition}_OI",
-                    forprinting=False,
-                    ylim_log=get_ylim_logscale(plot_data_oi, 'oblique index'))
