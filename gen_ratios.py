@@ -149,7 +149,7 @@ def plot_dframe(dframe, measure, title_cond, iv1, iv2=None, title=None, savepath
     i_bar.fig.subplots_adjust(wspace=width_space, hspace=height_space)
     i_bar.add_legend(fontsize=legend_fontsize)
     i_bar.tight_layout()
-    i_bar.fig.set(dpi=250)
+    i_bar.fig.set(dpi=my_dpi)
     # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
     i_bar.savefig(os.path.join(savepath, f"{title}_lin.png"))
     i_bar.set(yscale='log', ylim=ylim_log)
@@ -384,6 +384,7 @@ iv = 'contrast'
 dv = 'threshold'
 orientation = 'ori'
 ylimit_log = (0.4, 7)
+my_dpi = 25
 
 for i_file in os.listdir():
     if i_file.split('.')[-1] != 'pkl':
@@ -462,7 +463,7 @@ for i_file in os.listdir():
             j.set_xticklabels(j.get_xticklabels(), size=tick_size)
         i_bar.fig.subplots_adjust(wspace=width_space, hspace=height_space)
         i_bar.tight_layout()
-        i_bar.fig.set(dpi=250)
+        i_bar.fig.set(dpi=my_dpi)
         i_bar.savefig(os.path.join(i_ratio_path, f"{i_condition}_decoders_ratios.png"))
         i_bar.savefig(os.path.join(i_graph_path, f"{i_condition}_decoders_ratios.png"))
         # i_bar.set(yscale='log', ylim=(all_ymin, np.ceil(all_ymax)))
