@@ -703,7 +703,7 @@ if __name__ == '__main__':
         debug = True
         if debug:
             print('...debug without multiprocessing\n')
-            ori_std = [90, 90, 90]
+            ori_std = [-45, 0, 45, 90]
             debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
             print('...end')
         else:
