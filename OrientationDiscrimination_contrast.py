@@ -95,8 +95,8 @@ class Params:
         # set model parameters to be varied
         self.sampling_density = sampling_density  # neurons per degree
         self.sampling_range = sampling_range
-        self.tuning_fwhm = tuning_fwhm  # = sigma * 2.3548
-        # set constant model parameters
+        self.tuning_fwhm = tuning_fwhm  # HWHM = s * sqrt(2ln2) = s * 2.3548
+        # set constant model parameters`
         self.r_max = r_max
         self.spont = spont
         self.exponent = exponent
@@ -381,12 +381,18 @@ class PopulationCode:
         # generate noiseless response from tunings
         self.resp_tuned = self.trial_tunings[:, stim_ori_idx]
 
-        # error checking that stim val is in centre of prefs window - circular tuning maintained
+        # error checking that stim val results in a peak response - circular tuning maintained
         maxidx_ = (len(self.resp_tuned) - 1) / 2
-        if self.resp_tuned.argmax() != np.ceil(maxidx_):
-            if self.resp_tuned.argmax() != np.floor(maxidx_):
-                print(f'circular tuning failed')
-                print(f'stim_ori {stim_ori} not in centre of prefs window, in position {self.resp_tuned.argmax()}\n')
+        maxidx_ = [int(np.floor(maxidx_)), int(np.ceil(maxidx_))]
+
+        if all(i != self.resp_tuned.argmax() for i in maxidx_):
+            if any(self.resp_tuned[i - 1] <= self.resp_tuned[i] <= self.resp_tuned[i + 1] for i in maxidx_):
+                pass
+            else:
+                print(f"Circular tuning may have failed...\n"
+                      f"Stim_ori {stim_ori} causes max response at pref_idx {self.resp_tuned.argmax()}"
+                      f" rather than centre_idx {int(np.round(len(trial_prefs) / 2))}"
+                      f"\nStim does not result in a peak response at central orientation")
 
         # generate noisy response using poisson noise
         self.resp_noisy = np.random.poisson(self.resp_tuned)
@@ -586,8 +592,6 @@ def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, co
 
 if __name__ == '__main__':
 
-    debug = False
-
     # all possible params
     density_1 = [1, 1/1.5, 1/2, 1/2.5, 1/3, 1/3.5, 1/4, 1/4.5, 1/5, 1/5.5]
     fwhm_1 = [50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
@@ -601,8 +605,8 @@ if __name__ == '__main__':
     i_f = 1
     # loop_conds[0] = i_d   loop_conds[1] = i_t   loop_conds[2] = t_2
 
-    d = [1, 5, 9]  # sampling density of obliques
-    t = [1, 4, 7]  # tuning width fwhm
+    d = [1, 3, 7]  # sampling density of obliques
+    t = [10]  # tuning width fwhm
     b = [1]  # boundary
     f = [2]  # firing rate  (Shen et al., 2014)
 
@@ -696,8 +700,12 @@ if __name__ == '__main__':
         n_runs = n_runs
         contrast = contrasts
 
+        debug = True
         if debug:
+            print('...debug without multiprocessing\n')
+            ori_std = [90, 90, 90]
             debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
+            print('...end')
         else:
             # get all possible iterations / combinations of conditions for use in multiprocessing
             mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}

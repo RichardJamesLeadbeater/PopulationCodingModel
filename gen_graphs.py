@@ -145,7 +145,7 @@ def plot_dframe(dframe, measure, title_cond, iv1, iv2=None, title=None, savepath
     i_bar.fig.subplots_adjust(wspace=width_space, hspace=height_space)
     i_bar.add_legend(fontsize=legend_fontsize)
     i_bar.tight_layout()
-    i_bar.fig.set(dpi=250)
+    i_bar.fig.set(dpi=my_dpi)
     # i_bar.savefig(os.path.join(savepath, f"{'TEST'}.png"))
     i_bar.savefig(os.path.join(savepath, f"{title}_lin.png"))
     i_bar.set(yscale='log', ylim=ylim_log)
@@ -167,6 +167,8 @@ width_space = .2
 height_space = .3
 lin_ymin = 0.0
 lin_ymax = None
+my_dpi = 100
+
 og_path = os.getcwd()
 summary_path = os.path.join(og_path, 'summary')
 data_path = os.path.join(og_path, 'data')
@@ -182,7 +184,7 @@ datasets = []
 
 ivs = dict(decoder=['WTA', 'PV', 'ML'],
            ori=['horizontal', 'vertical', 'minus45', 'plus45', 'cardinal', 'oblique'],
-           contrast=['2.5', '5.0', '10.0', '20.0', '40.0', '80.0'])
+           contrast=['2.5', '5.0', '10.0', '20.0', '40.0'])
 
 for i_file in os.listdir():
     if i_file.split('.')[-1] != 'pkl':

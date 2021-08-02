@@ -186,13 +186,13 @@ def get_each_ratio(dframe, conds=None, output_type=None):
         output_type = 'table'
         cols = which_ratios
     elif output_type == 'dframe':
-        cols = ['ratio', 'value']
+        cols = ['ratio score', 'value']
     if not conds:
         if output_type == 'table':
             ratio = init_cols(cols)
             # ratio['v/h'].append(get_ratio(dframe, ['vertical', 'horizontal'], categ=orientation))
             # ratio['m45/p45'].append(get_ratio(dframe, ['minus45', 'plus45'], categ=orientation))
-            ratio['o/c'].append(get_ratio(dframe, ['oblique', 'cardinal'], categ=orientation))
+            ratio['OI'].append(get_ratio(dframe, ['oblique', 'cardinal'], categ=orientation))
     else:
         if not isinstance(conds, list):
             conds = [conds]
@@ -206,13 +206,13 @@ def get_each_ratio(dframe, conds=None, output_type=None):
                 if output_type == 'table':
                     # ratio['v/h'].append(get_ratio(i_data, ['vertical', 'horizontal'], categ=orientation))
                     # ratio['m45/p45'].append(get_ratio(i_data, ['minus45', 'plus45'], categ=orientation))
-                    ratio['o/c'].append(get_ratio(i_data, ['oblique', 'cardinal'], categ=orientation))
+                    ratio['OI'].append(get_ratio(i_data, ['oblique', 'cardinal'], categ=orientation))
                 elif output_type == 'dframe':
-                    # ratio['ratio'].append('v/h')
+                    # ratio['ratio score'].append('v/h')
                     # ratio['value'].append(get_ratio(i_data, ['vertical', 'horizontal'], categ=orientation))
-                    # ratio['ratio'].append('m45/p45')
+                    # ratio['ratio score'].append('m45/p45')
                     # ratio['value'].append(get_ratio(i_data, ['minus45', 'plus45'], categ=orientation))
-                    ratio['ratio'].append('o/c')
+                    ratio['ratio score'].append('OI')
                     ratio['value'].append(get_ratio(i_data, ['oblique', 'cardinal'], categ=orientation))
 
             elif len(list(conds)) > 1:
@@ -225,7 +225,7 @@ def get_each_ratio(dframe, conds=None, output_type=None):
                         ratio[conds[1]].append(j)
                         # ratio['v/h'].append(get_ratio(j_data, ['vertical', 'horizontal'], categ=orientation))
                         # ratio['m45/p45'].append(get_ratio(j_data, ['minus45', 'plus45'], categ=orientation))
-                        ratio['o/c'].append(get_ratio(j_data, ['oblique', 'cardinal'], categ=orientation))
+                        ratio['OI'].append(get_ratio(j_data, ['oblique', 'cardinal'], categ=orientation))
 
     return pd.DataFrame.from_dict(ratio)
 
@@ -257,7 +257,7 @@ def append_dicty(dicty, val_list):
 
 def get_overall_mean(ratio_data):
     all_conds_all_observers = {}
-    for col in ['v/h', 'm45/p45', 'o/c']:
+    for col in ['v/h', 'm45/p45', 'OI']:
         all_conds_all_observers[col] = ratio_data[col].mean()
     return pd.DataFrame(all_conds_all_observers, index=[dv])
 
@@ -296,7 +296,7 @@ def calc_mean_of_ratios(values):
 def get_mean_of_ratios(dframe, condition, ratio_cols=None):
     if ratio_cols is None:
         ratio_cols = which_ratios
-    # output = init_cols([condition, 'ratio', 'mean_ratio'])
+    # output = init_cols([condition, 'ratio score', 'mean_ratio'])
     output_table = init_cols([condition] + ratio_cols)
     for cond in dframe[condition].unique():  # keep separate to keep col lengths equal
         output_table[condition].append(cond)
@@ -359,7 +359,7 @@ height_space = .3
 lin_ymin = 0.0
 lin_ymax = None
 
-which_ratios = ['o/c']
+which_ratios = ['OI']
 
 og_path = os.getcwd()
 data_path = os.path.join(og_path, 'data')  # raw data
@@ -384,7 +384,7 @@ iv = 'contrast'
 dv = 'threshold'
 orientation = 'ori'
 ylimit_log = (0.4, 7)
-my_dpi = 25
+my_dpi = 100
 
 for i_file in os.listdir():
     if i_file.split('.')[-1] != 'pkl':
@@ -418,6 +418,7 @@ for i_file in os.listdir():
         i_summary = pd.read_pickle(os.path.join(summary_path, f"{i_condition}_allsummary.pkl"))
         # i_summary = change_dframe_col_name(i_summary, 'iv', iv)
         # i_summary = add_cardinal_and_oblique(i_summary)  # append cardinal and oblique collapsed conditions
+        i_summary = i_summary[(i_summary['iv'] != 80)]
         i_summary = add_cardinal_and_oblique(i_summary)
         i_summary = change_dframe_labels(i_summary, 'ori', [-45, 0, 45, 90],  # replace old labels with new ones
                                       ['minus45', 'vertical', 'plus45', 'horizontal'])
@@ -430,13 +431,13 @@ for i_file in os.listdir():
         each_ratio = get_each_ratio(i_summary, ['decoder', 'contrast'])
         to_csv_pkl(each_ratio, i_ratio_path, f"{i_condition}_allratios", pkl=True, csv=False)
 
-        plot_data = summary_to_dframe(each_ratio, which_ratios, 'ratio')
+        plot_data = summary_to_dframe(each_ratio, which_ratios, 'ratio score')
 
         i_bar = sns.catplot(x=iv, y='values',
                             hue='decoder', hue_order=plot_data['decoder'].unique().tolist(),
                             kind='point', legend=False,
                             capsize=.04, sharey=True, palette='colorblind',
-                            data=plot_data, n_boot=None, col='ratio')
+                            data=plot_data, n_boot=None, col='ratio score')
         # change size of markers on line plot
         all_ymin = 1000
         all_ymax = -1
@@ -455,7 +456,7 @@ for i_file in os.listdir():
         # i_bar.fig.suptitle(f"Orientation ratios", size=18, y=.98)
         i_bar.set_titles(col_template="{col_name}", size=title_size, y=1, weight='bold')
         i_bar.set_xlabels(iv, size=label_size)
-        i_bar.set_ylabels('ratio', size=label_size)
+        i_bar.set_ylabels('ratio score', size=label_size)
         i_bar.add_legend(fontsize=legend_fontsize)
         for j in i_bar.axes.flatten():
             j.tick_params(labelleft=True, labelbottom=True)
