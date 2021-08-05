@@ -20,11 +20,13 @@ import os
 
 
 """Population Coding Model that performs an orientation discrimination two-alternative forced-choice task"""
+# todo implement spontaneous firing rate after contrast scaled response
+
 # notes:
 #       - METHOD OF CONSTANT STIMULI
 #         > loop through each std_ori
 #         > tuned response for standard and comparison for each orientation * nReps * nRuns
-#         > proportion CW for each run (blocks of nReps)
+#         > proportion correct (always CW in model) for each run (blocks of nReps)
 #         > use PCN curve fitting routine to pull threshold across all runs
 
 # standard_oris = [-45, 0, 45, 90]
@@ -211,7 +213,7 @@ class NeuralPopulation:
         repeated_tiling = tiling * np.ones([len(self.prefs), 1])
         tunings = generate_gaussian(repeated_tiling, self.prefs, self.sigma)
         tunings = tunings / tunings.max()  # normalise to 1
-        tunings = tunings * self.r_max + (self.spont * self.r_max)  # normalise to rmax then + spont firing
+        tunings = tunings * self.r_max  # normalise to rmax
         self.tunings = tunings
         return self.tunings
 
@@ -328,16 +330,22 @@ class PopulationCode:
             self.resp_contrast = resp_contrast
         return resp_contrast
 
-    def get_contrast_adjusted_tunings(self, stim_con=None):
-        if stim_con is None:
-            stim_con = self.trial_stim_con
+    def get_adjusted_tunings(self, contrast_adjustment=True, spontaneous_firing=True):
+        stim_con = self.trial_stim_con
         adjusted_tunings = []
         all_prefs = []
         for i_pop in self.neural_populations:
             all_prefs = np.hstack([all_prefs, i_pop.prefs])  # use this to sort by
+            i_tunings = i_pop.tunings  # initialise one ori_population tunings
             # contrast mod on each pops tunings, utilising each pops exponent and semi_sat
-            adjusted_tunings.append(self.contrast_response(i_pop.tunings, stim_contrast=stim_con,
-                                                           n=i_pop.exponent, c50=i_pop.semi_sat))
+            if contrast_adjustment:
+                i_tunings = self.contrast_response(i_pop.tunings, stim_contrast=stim_con,
+                                                   n=i_pop.exponent, c50=i_pop.semi_sat)
+            if spontaneous_firing:  # apply spontaneous firing rate after contrast adjustment
+                i_tunings = i_tunings + (i_pop.r_max * i_pop.spont)
+            else:
+                pass
+            adjusted_tunings.append(i_tunings)
         adjusted_tunings = np.vstack([i for i in adjusted_tunings])
         (all_prefs, adjusted_tunings) = sort_by_standard(all_prefs, adjusted_tunings)
 
@@ -360,51 +368,37 @@ class PopulationCode:
         self.trial_prefs_idx = window_idxs
         return window_vals, window_idxs
 
-    def wta(self, pop_resp=None, trial_prefs=None):
-        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
-        # trial_prefs: 1D prefs(vals)
-        if pop_resp is None:
-            pop_resp = self.resp_noisy
-        if trial_prefs is None:
-            trial_prefs = self.trial_prefs
-        trial_max = pop_resp.max()  # max response for each trial
-        ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial
-        trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax()  # idx of pref with max response
-        wta_est = trial_prefs[trial_pref_idx]
-        # which pref produced the strongest response each trial
-        return wta_est
-
-    def gen_stim_response(self, stim_ori, stim_ori_idx=None, stim_con=100, trial_decoder=None):
+    def gen_stim_response(self, stim_ori, stim_con=100, trial_decoder=None, n_reps=1, spontaneous_firing=True):
         # assign mutable stim vals
         self.trial_stim_ori = stim_ori
-        if stim_ori_idx is None:
-            _, stim_ori_idx = find_nearest(self.tiling, stim_ori)
+        _, stim_ori_idx = find_nearest(self.tiling, stim_ori)
         self.trial_stim_ori_idx = stim_ori_idx
         self.trial_stim_con = stim_con
         # adjust tunings dependent on CRF of each pop
-        trial_tunings = self.get_contrast_adjusted_tunings()
+        trial_tunings = self.get_adjusted_tunings(spontaneous_firing=spontaneous_firing)  # applies spont after contrast
         # save used window of prefs and tunings for later decoding
         trial_prefs, trial_prefs_idx = self.shift_prefs(stim_ori)
         # tunings within prefs window for this stim_ori
         self.trial_tunings = trial_tunings[trial_prefs_idx, :]  # save trial tunings for max likelihood
+
         # generate noiseless response from tunings
-        self.resp_tuned = self.trial_tunings[:, stim_ori_idx]
+        # old # self.resp_tuned = self.trial_tunings[:, stim_ori_idx]  # old #
+        resp_tuned = self.trial_tunings[:, stim_ori_idx]
+        self.resp_tuned = np.transpose(resp_tuned * np.ones([n_reps, 1]))  # ***
+        # generate noisy response using poisson noise
+        self.resp_noisy = np.random.poisson(self.resp_tuned)
 
-        # error checking that stim val results in a peak response - circular tuning maintained
-        maxidx_ = (len(self.resp_tuned) - 1) / 2
+        # error checking that stim val results in a peak response - circular tuning maintained # ***
+        maxidx_ = (len(resp_tuned) - 1) / 2
         maxidx_ = [int(np.floor(maxidx_)), int(np.ceil(maxidx_))]
-
-        if all(i != self.resp_tuned.argmax() for i in maxidx_):
-            if any(self.resp_tuned[i - 1] <= self.resp_tuned[i] <= self.resp_tuned[i + 1] for i in maxidx_):
+        if all(i != resp_tuned.argmax() for i in maxidx_):
+            if any(resp_tuned[i - 1] <= resp_tuned[i] <= resp_tuned[i + 1] for i in maxidx_):
                 pass
             else:
                 print(f"Circular tuning may have failed...\n"
-                      f"Stim_ori {stim_ori} causes max response at pref_idx {self.resp_tuned.argmax()}"
+                      f"Stim_ori {stim_ori} causes max response at pref_idx {resp_tuned.argmax()}"
                       f" rather than centre_idx {int(np.round(len(trial_prefs) / 2))}"
                       f"\nStim does not result in a peak response at central orientation")
-
-        # generate noisy response using poisson noise
-        self.resp_noisy = np.random.poisson(self.resp_tuned)
 
         if trial_decoder is None:
             pass
@@ -420,43 +414,60 @@ class PopulationCode:
         # return
         return self.resp_noisy
 
-    def popvector(self, pop_resp=None, prefs=None):
+    def decode_response(self, response_decoder='WTA',
+                        stim_ori=None, stim_con=None, n_reps=None, spontaneous_firing=True):
+        if all(i for i in [stim_ori, stim_con, n_reps]):
+            self.gen_stim_response(stim_ori, stim_con, response_decoder, n_reps, spontaneous_firing=spontaneous_firing)
+        decoded_val = None
+        if response_decoder == 'WTA':
+            decoded_val = self.wta()
+        elif response_decoder == 'PV':
+            decoded_val = self.popvector()
+        elif response_decoder == 'ML':
+            decoded_val = self.maxlikelihood()
+        self.decoded = decoded_val
+        return decoded_val
+
+    def wta(self, pop_resp=None, trial_prefs=None):
         # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
         # trial_prefs: 1D prefs(vals)
         if pop_resp is None:
             pop_resp = self.resp_noisy
-        if prefs is None:
-            prefs = self.trial_prefs
-        trial_resp = pop_resp
-        cond_prefs = prefs * (np.pi / 180)  # convert to radians
-        hori = np.sum((trial_resp * np.cos(cond_prefs)))
-        vert = np.sum((trial_resp * np.sin(cond_prefs)))
+        if trial_prefs is None:
+            trial_prefs = self.trial_prefs
+        trial_max = pop_resp.max(0)  # max response for each trial  *** .max()
+        ismax = (trial_max == pop_resp).astype('int')  # bool 01 matrix of max for each trial
+        trial_pref_idx = (ismax * np.random.random(size=ismax.shape)).argmax(0)  # idx of pref with max response  *** .argmax()
+        wta_est = trial_prefs[trial_pref_idx]
+        # which pref produced the strongest response each trial
+        return wta_est
+
+    def popvector(self, pop_resp=None, pop_prefs=None):
+        # pop_resp: 2D neuron(rows) x trial(cols) for resp(vals)
+        # trial_prefs: 1D prefs(vals)
+        if pop_resp is None:
+            pop_resp = self.resp_noisy
+        if pop_prefs is None:
+            pop_prefs = self.trial_prefs
+        cond_prefs = pop_prefs * (np.pi / 180)  # convert to radians
+        # hori = np.sum((pop_resp * np.cos(cond_prefs)))  *** see below
+        hori = np.sum((pop_resp.T * np.cos(cond_prefs)).T, 0)
+        # vert = np.sum((pop_resp * np.sin(cond_prefs)))  *** see below
+        vert = np.sum((pop_resp.T * np.sin(cond_prefs)).T, 0)
         popvector_est = (np.arctan2(vert, hori) * (180 / np.pi))  # inverse tangent in degrees
         return popvector_est
 
-    def maxlikelihood(self, pop_resp=None, tunings=None, tiling=None):
+    def maxlikelihood(self, pop_resp=None, pop_tunings=None, tiling=None):
         if pop_resp is None:
             pop_resp = self.resp_noisy
-        if tunings is None:
-            tunings = self.trial_tunings
+        if pop_tunings is None:
+            pop_tunings = self.trial_tunings
         if tiling is None:
             tiling = self.tiling
-        log_tunings = np.log10(tunings)
-        log_likelihood = pop_resp.T @ log_tunings  # matrix multiplication; outputs: size=[trials, tiling]
-        max_likelihood_idx = log_likelihood.argmax()  # gives idx in feature space of ML est
-        maxlikelihood_est = (tiling[max_likelihood_idx])
+        log_likelihood = pop_resp.T @ np.log10(pop_tunings)  # matrix multiplication; outputs: size=[trials, tiling]
+        max_likelihood_idx = log_likelihood.argmax(1)  # gives idx in feature space of ML est  *** .argmax()
+        maxlikelihood_est = tiling[max_likelihood_idx]
         return maxlikelihood_est
-
-    def decode_response(self, decoder='WTA'):
-        decoded_val = None
-        if decoder == 'WTA':
-            decoded_val = self.wta()
-        elif decoder == 'PV':
-            decoded_val = self.popvector()
-        elif decoder == 'ML':
-            decoded_val = self.maxlikelihood()
-        self.decoded = decoded_val
-        return decoded_val
 
 
 class StaircaseHandler:
@@ -636,7 +647,6 @@ if __name__ == '__main__':
 
         contrasts = [2.5, 5, 10, 20, 40, 80]
         n_runs = 30
-        # contrasts = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
 
         filename = f"B{i_b}_D{i_d}_T{i_t}_F{i_f}_{len(contrasts)}cons_{n_runs}runs_semisat{shared.semi_sat}"
         og_path = os.getcwd()
@@ -708,6 +718,44 @@ if __name__ == '__main__':
         ori_std = [-45, 0, 45, 90]
         n_runs = n_runs
         contrast = contrasts
+
+        # at low contrasts the PV and ML decoders fail due to integer scale of poisson noise
+        # (may have affected prev staircase results)
+        mocs = True
+        ori_std = [-45, 0, 45, 90]
+        contrast = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
+        min_level = 0
+        max_level = 20
+        n_levels = 21
+        n_level_reps = 100
+        ori_offset = np.linspace(min_level, max_level, n_levels)  # ensure sensitive psychometric function
+        if mocs:
+            tic = time.time()
+            mocs_data = dict(decoder=[], std_ori=[], ori_offset=[], contrast=[], proportion_correct=[])
+            for i_std_ori in ori_std:
+                for j_ori_offset in ori_offset:
+                    j_comp_ori = i_std_ori + j_ori_offset
+                    for k_contrast in contrast:
+                        # print(f"\nStandard Ori: {i_std_ori}\nComparison Ori: {j_comp_ori}")
+                        for l_decoder in ['WTA', 'PV', 'ML']:
+                            # get noisy_resp and decoded for each std and offsets for n_reps
+                            std_decoded = PopCode.decode_response(l_decoder, j_comp_ori, k_contrast, n_level_reps,
+                                                                  True)
+                            comp_decoded = PopCode.decode_response(l_decoder, j_comp_ori, k_contrast, n_level_reps,
+                                                                   True)
+                            isCW = comp_decoded > std_decoded  # oridis for each trial
+                            proportion_correct = (1 / len(isCW)) * np.sum(isCW)
+                            # print(f"{l_decoder}:  {proportion_correct:.4}")
+                            # append vals into data_dict
+                            mocs_data['decoder'].append(l_decoder)
+                            mocs_data['std_ori'].append(i_std_ori)
+                            mocs_data['ori_offset'].append(j_ori_offset)
+                            mocs_data['contrast'].append(k_contrast)
+                            mocs_data['proportion_correct'].append(proportion_correct)
+            print(f"mocs took {time.time() - tic:.1f}s")
+            mocs_data = pd.DataFrame(mocs_data)
+            mocs_data.to_csv('test_mocs_data.csv')
+            mocs_data.to_pickle('test_mocs_data.pkl')
 
         debug = True
         if debug:

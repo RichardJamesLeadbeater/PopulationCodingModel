@@ -152,7 +152,6 @@ class NeuralPopulation:
         return self.tunings
 
     def contrast_response(self, tuned_resp, stim_contrast, n=None, c50=None):
-        # todo implement this
         # con is contrast of stimulus
         # n is exponent for steepness of curve
         if n is None:
@@ -243,7 +242,6 @@ def adjust_boundaries(boundaries, adjuster_values):
     return adjusted_bounds
 
 
-# todo create trial handler class which can store data from multiple runs
 class PopulationResponse:
     def __init__(self, n_trials, stim_vals, stim_idxs, tunings, prefs_windows, prefs_all):
         self.n_trials = n_trials

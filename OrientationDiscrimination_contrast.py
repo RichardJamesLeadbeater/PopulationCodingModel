@@ -20,6 +20,7 @@ import os
 
 
 """Population Coding Model that performs an orientation discrimination two-alternative forced-choice task"""
+# todo use spontaneous firing rate to deal with PV and ML failure with poisson noise at low contrasts
 # notes:
 #       - circular tuning enabled by having a moving window of prefs centred on stim_val
 #       - currently one staircase doing one run at a time (WTA: 3m47s, PV: 3m57s, ML: 5m54s)
@@ -580,6 +581,7 @@ def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, co
                 comparison_decoded = popcode.decode_response(decoder=staircase.decoder_info)
 
                 if comparison_decoded < standard_decoded:
+                    # todo this may be susceptible to issue with ML and PV failure due to integer scale of poisson noise
                     this_ans = 'CCW'
                 else:
                     this_ans = 'CW'
