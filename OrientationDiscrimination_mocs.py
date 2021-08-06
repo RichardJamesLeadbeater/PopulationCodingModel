@@ -17,10 +17,14 @@ import time
 import dill as pickle
 import multiprocessing as mp
 import os
+from scipy.optimize import curve_fit
+import pylab
 
 
 """Population Coding Model that performs an orientation discrimination two-alternative forced-choice task"""
-# todo implement spontaneous firing rate after contrast scaled response
+# one interesting thing the psychometric functions show is that
+# there is no point at which an ori_diff increase makes no difference
+# with human observers an ogive is observed but with the model it's monotonic and gradual
 
 # notes:
 #       - METHOD OF CONSTANT STIMULI
@@ -568,16 +572,92 @@ class StaircaseHandler:
         self.data = self.data.sort_values(by=['ori', 'iv'], key=lambda x: x.map(custom_sort))
 
 
-def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, contrasts=None):
+def logistic_function(x, x0, k):
+    # Add 0.5 to the intercept and multiply the sigmoid by 0.5 since it now only spans a y-range half of before
+    y = 0.5 + 0.5 / (1 + np.exp(-k * (x - x0)))
+    return y
+
+
+def fit_logistic(x_vals, y_vals):
+    """ creates vals of logistic curve (params determined from psychometric data)"""
+
+    x_vals = np.asarray(x_vals)
+    y_vals = np.asarray(y_vals)
+    # determine params of logistic curve using least squares method
+    popt, _ = curve_fit(logistic_function, x_vals, y_vals, method='trf',
+                        maxfev=4000,
+                        bounds=([0, 0], [x_vals.max(), 10])  # gradient and middle of slope positive
+                        )
+    threshold = popt[0]
+
+    # if threshold > (x_vals.max() - 0.5):
+    #     print(f"{surname}\t{exp_name}\t{target_ori}\t{threshold:.2f}")
+    #     global test
+    #     test = dict(id=surname, exp=exp_name, ori=target_ori)
+
+    slope = popt[1]
+    # output of logistic function given x-vals and optimised params
+    x = np.linspace(x_vals.min(), x_vals.max(), len(x_vals) * 100)
+    y = logistic_function(x, *popt)
+
+    # namedtuple does not work with multiprocessing
+    return {'x': x, 'y': y, 'threshold': threshold, 'slope': slope}
+
+
+def plot_psychometric(x_axis, y_axis, x_fit_axis, y_fit_axis, threshold_value, title='', close_all=True):
+    # todo plot error bars
+    threshold_idx = np.argmin(abs(x_fit_axis - threshold_value))
+    if close_all:
+        pylab.close('all')
+    else:
+        pass
+    pylab.figure()
+    pylab.plot(x_axis, y_axis, 'o', label='data')
+    pylab.plot(x_fit_axis, y_fit_axis, label='fit')
+    pylab.ylim(0 - .01, 1.01)
+    pylab.xlim(x_axis.min() - 0.01, x_axis.max() + 0.01)
+    pylab.plot([threshold_value, threshold_value], [0, y_fit_axis[threshold_idx]], 'k--', alpha=0.3)
+    pylab.plot([0, threshold_value], [y_fit_axis[threshold_idx], y_fit_axis[threshold_idx]], 'k--', alpha=0.3)
+    pylab.xlabel('Orientation Difference (deg)')
+    pylab.ylabel('Proportion Correct')
+    pylab.title(title)
+    pylab.legend(loc='best')
+
+
+def perform_oridis_2afc_mocs(mocs_popcode, mocs_decoder, mocs_std_ori, mocs_contrast, mocs_ori_offsets, mocs_n_reps):
+    mocs_raw_data = dict(ori_offset=[], proportion_correct=[])
+    for i_ori_offset in mocs_ori_offsets:
+        i_comp_ori = mocs_std_ori + i_ori_offset
+        std_decoded = mocs_popcode.decode_response(mocs_decoder, mocs_std_ori, mocs_contrast, mocs_n_reps)
+        comp_decoded = mocs_popcode.decode_response(mocs_decoder, i_comp_ori, mocs_contrast, mocs_n_reps)
+        isCW = comp_decoded > std_decoded  # oridis for each trial
+        proportion_correct = (1 / len(isCW)) * np.sum(isCW)
+        # append vals into data_dict
+        mocs_raw_data['ori_offset'].append(i_ori_offset)
+        mocs_raw_data['proportion_correct'].append(proportion_correct)
+
+    if any(i >= 0.75 for i in mocs_raw_data['proportion_correct']):  # only get threshold if above chance performance
+        mocs_curve_fit = fit_logistic(x_vals=mocs_ori_offsets, y_vals=mocs_raw_data['proportion_correct'])
+        plot_psychometric(x_axis=ori_offset, y_axis=mocs_raw_data['proportion_correct'],
+                          x_fit_axis=mocs_curve_fit['x'], y_fit_axis=mocs_curve_fit['y'],
+                          threshold_value=mocs_curve_fit['threshold'])
+        mocs_summary_data = dict(decoder=mocs_decoder, std_ori=mocs_std_ori, contrast=mocs_contrast,
+                                 threshold=mocs_curve_fit['threshold'], slope=mocs_curve_fit['slope'])
+        return pd.DataFrame(mocs_summary_data, index=[''])
+    else:
+        return None
+
+
+def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, contrasts_2afc=None):
     if decoder_id is None:
         decoder_id = 'WTA'
     staircase.decoder_info = decoder_id
     if oris is None:
         oris = [0]
-    if contrasts is None:
-        contrasts = [100]
+    if contrasts_2afc is None:
+        contrasts_2afc = [100]
     for i_ori in oris:  # loop through each standard orientation
-        for i_con in contrasts:  # loop through each value of iv
+        for i_con in contrasts_2afc:  # loop through each value of iv
             staircase.run_info['ori'].append(i_ori)
             staircase.run_info['iv'].append(i_con)
             staircase.run_info['decoder'].append(decoder_id)
@@ -727,36 +807,81 @@ if __name__ == '__main__':
         min_level = 0
         max_level = 20
         n_levels = 21
-        n_level_reps = 100
+        n_level_reps = 1000
         ori_offset = np.linspace(min_level, max_level, n_levels)  # ensure sensitive psychometric function
+        decoder = ['WTA', 'PV', 'ML']
         if mocs:
+            # tic = time.time()
+            # summary_data = dict(decoder=[], std_ori=[], contrast=[], threshold=[], slope=[])
+            # for i_decoder in ['WTA', 'PV', 'ML']:
+            #     for i_std_ori in ori_std:
+            #         for i_contrast in contrast:
+            #             test = perform_oridis_2afc_mocs(PopCode, i_decoder, i_std_ori, i_contrast, ori_offset,
+            #                                             n_level_reps)
+                        # get all possible iterations / combinations of conditions for use in multiprocessing
             tic = time.time()
-            mocs_data = dict(decoder=[], std_ori=[], ori_offset=[], contrast=[], proportion_correct=[])
-            for i_std_ori in ori_std:
-                for j_ori_offset in ori_offset:
-                    j_comp_ori = i_std_ori + j_ori_offset
-                    for k_contrast in contrast:
-                        # print(f"\nStandard Ori: {i_std_ori}\nComparison Ori: {j_comp_ori}")
-                        for l_decoder in ['WTA', 'PV', 'ML']:
-                            # get noisy_resp and decoded for each std and offsets for n_reps
-                            std_decoded = PopCode.decode_response(l_decoder, j_comp_ori, k_contrast, n_level_reps,
-                                                                  True)
-                            comp_decoded = PopCode.decode_response(l_decoder, j_comp_ori, k_contrast, n_level_reps,
-                                                                   True)
-                            isCW = comp_decoded > std_decoded  # oridis for each trial
-                            proportion_correct = (1 / len(isCW)) * np.sum(isCW)
-                            # print(f"{l_decoder}:  {proportion_correct:.4}")
-                            # append vals into data_dict
-                            mocs_data['decoder'].append(l_decoder)
-                            mocs_data['std_ori'].append(i_std_ori)
-                            mocs_data['ori_offset'].append(j_ori_offset)
-                            mocs_data['contrast'].append(k_contrast)
-                            mocs_data['proportion_correct'].append(proportion_correct)
-            print(f"mocs took {time.time() - tic:.1f}s")
-            mocs_data = pd.DataFrame(mocs_data)
-            mocs_data.to_csv('test_mocs_data.csv')
-            mocs_data.to_pickle('test_mocs_data.pkl')
+            mp_iters = {'popcode': [], 'decoder': [], 'ori_std': [], 'contrast': [], 'offsets': [], 'n_level_reps': []}
+            n_iters = len(decoder) * len(ori_std) * len(contrast)  # all IVs
+            for i_decoder in decoder:
+                for i_ori_std in ori_std:
+                    for i_contrast in contrast:
+                        # IVs
+                        mp_iters['decoder'].append(i_decoder)
+                        mp_iters['ori_std'].append(i_ori_std)
+                        mp_iters['contrast'].append(i_contrast)
+                        # constants
+                        mp_iters['popcode'].append(PopCode)
+                        mp_iters['offsets'].append(ori_offset)
+                        mp_iters['n_level_reps'].append(n_level_reps)
+            with mp.Pool() as pool:
+                mp_data = pool.starmap(perform_oridis_2afc_mocs,
+                                       zip(mp_iters['popcode'], mp_iters['decoder'],
+                                           mp_iters['ori_std'], mp_iters['contrast'],
+                                           mp_iters['offsets'], mp_iters['n_level_reps'])
+                                       )
+                pool.close()
+                pool.join()
 
+            print(
+                f">>> mocs time taken =\n\t\t{(time.time() - tic):.2f} secs")
+
+            all_data = pd.concat([i.data for i in mp_data])
+            z = 1
+            #     mocs_data['ori_offset'].append(i_ori_offset)
+            #     mocs_data['contrast'].append(i_contrast)
+            #     mocs_data['proportion_correct'].append(proportion_correct)
+            # for i_ori_offset in ori_offset:
+            #     i_comp_ori = i_std_ori + i_ori_offset
+            #     # calculate proportion correct for each condition & offset
+            #     # get noisy_resp and decoded for each std and offsets for n_reps
+            #     std_decoded = PopCode.decode_response(i_decoder, i_std_ori, i_contrast, n_level_reps,
+            #                                           True)
+            #     comp_decoded = PopCode.decode_response(i_decoder, i_comp_ori, i_contrast, n_level_reps,
+            #                                            True)
+            #     isCW = comp_decoded > std_decoded  # oridis for each trial
+            #     proportion_correct = (1 / len(isCW)) * np.sum(isCW)
+            #     # print(f"{l_decoder}:  {proportion_correct:.4}")
+            #     # append vals into data_dict
+            #     mocs_data['decoder'].append(i_decoder)
+            #     mocs_data['std_ori'].append(i_std_ori)
+            #     mocs_data['ori_offset'].append(i_ori_offset)
+            #     mocs_data['contrast'].append(i_contrast)
+            #     mocs_data['proportion_correct'].append(proportion_correct)
+            # print(f"mocs took {time.time() - tic:.1f}s")
+            # mocs_data = pd.DataFrame(mocs_data)
+            # mocs_data.to_csv('test_mocs_data.csv')
+            # mocs_data.to_pickle('test_mocs_data.pkl')
+            # tic = time.time()
+            # mocs_summary_data = dict(decoder=[], std_ori=[], contrast=[], threshold=[])
+            # for i_decoder in mocs_data['decoder'].unique():
+            #     for i_std_ori in mocs_data['std_ori'].unique():
+            #         for i_contrast in mocs_data['contrast'].unique():
+            #             i_dframe = mocs_data[(mocs_data['decoder'] == i_decoder) &
+            #                                  (mocs_data['std_ori'] == i_std_ori) &
+            #                                  (mocs_data['contrast'] == i_contrast)]
+            #             i_curve_fit = fit_logistic(x_vals=ori_offset, y_vals=i_dframe['proportion_correct'])
+            #             print('')
+            # print(f"Curve fits took: {time.time() - tic}s")
         debug = True
         if debug:
             print('...debug without multiprocessing\n')

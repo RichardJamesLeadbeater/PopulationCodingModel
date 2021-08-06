@@ -167,7 +167,7 @@ width_space = .2
 height_space = .3
 lin_ymin = 0.0
 lin_ymax = None
-my_dpi = 100
+my_dpi = 30
 
 og_path = os.getcwd()
 summary_path = os.path.join(og_path, 'summary')
@@ -184,7 +184,7 @@ datasets = []
 
 ivs = dict(decoder=['WTA', 'PV', 'ML'],
            ori=['horizontal', 'vertical', 'minus45', 'plus45', 'cardinal', 'oblique'],
-           contrast=['2.5', '5.0', '10.0', '20.0', '40.0'])
+           contrast=['2.5', '5.0', '10.0', '20.0', '40.0', '80.0'])
 
 for i_file in os.listdir():
     if i_file.split('.')[-1] != 'pkl':
