@@ -14,7 +14,7 @@ import numpy as np
 from scipy.linalg import hankel
 import pandas as pd
 import time
-import dill as pickle
+import dill
 import multiprocessing as mp
 import os
 from scipy.optimize import curve_fit
@@ -28,7 +28,7 @@ import pylab
 
 # notes:
 #       - METHOD OF CONSTANT STIMULI
-#         > loop through each std_ori
+#         > loop through each ori_std
 #         > tuned response for standard and comparison for each orientation * nReps * nRuns
 #         > proportion correct (always CW in model) for each run (blocks of nReps)
 #         > use PCN curve fitting routine to pull threshold across all runs
@@ -36,7 +36,7 @@ import pylab
 # standard_oris = [-45, 0, 45, 90]
 # ori_offset = np.linspace(0, 22.5, n_levels)  # n_levels can be huge number to ensure sensitive range for psych func
 
-# # perform analysis on each std_ori at a time
+# # perform analysis on each ori_std at a time
 # for i_std in standard_oris:
 #     comparison_oris = [i + std for i in ori_offset]
 
@@ -399,10 +399,12 @@ class PopulationCode:
             if any(resp_tuned[i - 1] <= resp_tuned[i] <= resp_tuned[i + 1] for i in maxidx_):
                 pass
             else:
-                print(f"Circular tuning may have failed...\n"
-                      f"Stim_ori {stim_ori} causes max response at pref_idx {resp_tuned.argmax()}"
-                      f" rather than centre_idx {int(np.round(len(trial_prefs) / 2))}"
-                      f"\nStim does not result in a peak response at central orientation")
+                if show_errors:
+                    print(f"\nCircular tuning may have failed:"
+                          f"\n\t- Stim_ori {stim_ori} causes max tuned response at pref_idx {resp_tuned.argmax()}"
+                          f" rather than centre_idx {int(np.round(len(trial_prefs) / 2))}"
+                          f"\n\t- Stim does not result in a tuned response peak at central orientation"
+                          f"\n\t  ...this may be a result of shared values due to integer values with Poisson noise")
 
         if trial_decoder is None:
             pass
@@ -420,7 +422,7 @@ class PopulationCode:
 
     def decode_response(self, response_decoder='WTA',
                         stim_ori=None, stim_con=None, n_reps=None, spontaneous_firing=True):
-        if all(i for i in [stim_ori, stim_con, n_reps]):
+        if all(i or i == 0 for i in [stim_ori, stim_con, n_reps]):
             self.gen_stim_response(stim_ori, stim_con, response_decoder, n_reps, spontaneous_firing=spontaneous_firing)
         decoded_val = None
         if response_decoder == 'WTA':
@@ -496,7 +498,7 @@ class StaircaseHandler:
         self.continue_staircase = True
         self.threshold = []
         self.decoder_info = decoder_info
-        self.run_info = {'decoder': [], 'ori': [], 'iv': [], 'threshold': []}  # appends during runs
+        self.run_info = {'decoder': [], 'ori_std': [], 'contrast': [], 'threshold': []}  # appends during runs
         self.data = None
         self.extra_info = extra_info  # to be added externally when saving to pkl
 
@@ -564,12 +566,12 @@ class StaircaseHandler:
 
     def info2dframe(self):
         self.data = pd.DataFrame(self.run_info)
-        orders = dict(ori=self.data['ori'].unique(), iv=self.data['iv'].unique())
+        orders = dict(ori=self.data['ori_std'].unique(), iv=self.data['contrast'].unique())
         custom_sort = {}
         for i_categ in orders:
             for idx, cond in enumerate(orders[i_categ]):
                 custom_sort[cond] = idx
-        self.data = self.data.sort_values(by=['ori', 'iv'], key=lambda x: x.map(custom_sort))
+        self.data = self.data.sort_values(by=['ori_std', 'contrast'], key=lambda x: x.map(custom_sort))
 
 
 def logistic_function(x, x0, k):
@@ -624,11 +626,11 @@ def plot_psychometric(x_axis, y_axis, x_fit_axis, y_fit_axis, threshold_value, t
     pylab.legend(loc='best')
 
 
-def perform_oridis_2afc_mocs(mocs_popcode, mocs_decoder, mocs_std_ori, mocs_contrast, mocs_ori_offsets, mocs_n_reps):
+def perform_oridis_2afc_mocs(mocs_popcode, mocs_decoder, mocs_ori_std, mocs_contrast, mocs_ori_offsets, mocs_n_reps):
     mocs_raw_data = dict(ori_offset=[], proportion_correct=[])
     for i_ori_offset in mocs_ori_offsets:
-        i_comp_ori = mocs_std_ori + i_ori_offset
-        std_decoded = mocs_popcode.decode_response(mocs_decoder, mocs_std_ori, mocs_contrast, mocs_n_reps)
+        i_comp_ori = mocs_ori_std + i_ori_offset
+        std_decoded = mocs_popcode.decode_response(mocs_decoder, mocs_ori_std, mocs_contrast, mocs_n_reps)
         comp_decoded = mocs_popcode.decode_response(mocs_decoder, i_comp_ori, mocs_contrast, mocs_n_reps)
         isCW = comp_decoded > std_decoded  # oridis for each trial
         proportion_correct = (1 / len(isCW)) * np.sum(isCW)
@@ -640,46 +642,48 @@ def perform_oridis_2afc_mocs(mocs_popcode, mocs_decoder, mocs_std_ori, mocs_cont
         mocs_curve_fit = fit_logistic(x_vals=mocs_ori_offsets, y_vals=mocs_raw_data['proportion_correct'])
         plot_psychometric(x_axis=ori_offset, y_axis=mocs_raw_data['proportion_correct'],
                           x_fit_axis=mocs_curve_fit['x'], y_fit_axis=mocs_curve_fit['y'],
-                          threshold_value=mocs_curve_fit['threshold'])
-        mocs_summary_data = dict(decoder=mocs_decoder, std_ori=mocs_std_ori, contrast=mocs_contrast,
-                                 threshold=mocs_curve_fit['threshold'], slope=mocs_curve_fit['slope'])
+                          threshold_value=mocs_curve_fit['threshold'],
+                          title=f"{mocs_decoder} at {mocs_contrast}% contrast")
+        # if mocs_curve_fit['slope'] > 7:
+        #     print(f"slope: mocs_curve_fit['slope']")
+        #     z = 1
+        mocs_summary_data = {'decoder': mocs_decoder, 'ori_std': mocs_ori_std, 'contrast': mocs_contrast,
+                             'threshold': mocs_curve_fit['threshold'], 'slope': mocs_curve_fit['slope']}
         return pd.DataFrame(mocs_summary_data, index=[''])
     else:
         return None
 
 
-def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, contrasts_2afc=None):
-    if decoder_id is None:
-        decoder_id = 'WTA'
-    staircase.decoder_info = decoder_id
-    if oris is None:
-        oris = [0]
-    if contrasts_2afc is None:
-        contrasts_2afc = [100]
-    for i_ori in oris:  # loop through each standard orientation
-        for i_con in contrasts_2afc:  # loop through each value of iv
-            staircase.run_info['ori'].append(i_ori)
-            staircase.run_info['iv'].append(i_con)
-            staircase.run_info['decoder'].append(decoder_id)
+def perform_oridis_2afc_staircase(staircase, stair_popcode, stair_decoder='WTA', stair_oris=None,
+                                  stair_contrasts=None):
+    staircase.decoder_info = stair_decoder
+    if stair_oris is None:
+        stair_oris = [0]
+    if stair_contrasts is None:
+        stair_contrasts = [100]
+    for i_ori in stair_oris:  # loop through each standard orientation
+        for i_con in stair_contrasts:  # loop through each value of iv
+            staircase.run_info['ori_std'].append(i_ori)
+            staircase.run_info['contrast'].append(i_con)
+            staircase.run_info['decoder'].append(stair_decoder)
             staircase.continue_staircase = True
             while staircase.continue_staircase:
                 level = staircase.current_level
-                standard = Stimuli(ori=i_ori, con=i_con, tiling=popcode.tiling)
+                standard = Stimuli(ori=i_ori, con=i_con, tiling=stair_popcode.tiling)
                 if random.random() > 0.5:  # rand ori_diff direction of rotation (probs unnecess for model)
                     corr_ans = 'CW'
                     comparison = Stimuli(ori=(standard.ori + level),
-                                         con=standard.con, tiling=popcode.tiling)
+                                         con=standard.con, tiling=stair_popcode.tiling)
                 else:
                     corr_ans = 'CCW'
                     comparison = Stimuli(ori=(standard.ori - level),
-                                         con=standard.con, tiling=popcode.tiling)
+                                         con=standard.con, tiling=stair_popcode.tiling)
                 # generate response to stimulus ori & contrast
-                popcode.gen_stim_response(standard.ori, standard.ori_idx, standard.con)
-                standard_decoded = popcode.decode_response(decoder=staircase.decoder_info)
-                popcode.gen_stim_response(comparison.ori, comparison.ori_idx, comparison.con)
-                comparison_decoded = popcode.decode_response(decoder=staircase.decoder_info)
-
-                if comparison_decoded < standard_decoded:
+                std_decoded = stair_popcode.decode_response(stair_decoder, i_ori, i_con, n_reps=1,
+                                                            spontaneous_firing=True)
+                comp_decoded = stair_popcode.decode_response(stair_decoder, comparison.ori, i_con, n_reps=1,
+                                                             spontaneous_firing=True)
+                if comp_decoded < std_decoded:
                     this_ans = 'CCW'
                 else:
                     this_ans = 'CW'
@@ -693,42 +697,31 @@ def perform_2afc_ori_contrast(staircase, popcode, decoder_id=None, oris=None, co
 if __name__ == '__main__':
 
     # all possible params
-    density_1 = [1, 1/1.5, 1/2, 1/2.5, 1/3, 1/3.5, 1/4, 1/4.5, 1/5, 1/5.5]
-    fwhm_1 = [50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
-    bounds_1 = [[45, 45], [30, 60], [20, 70], [10, 80], [5, 85]]
-    rmax_1 = [120, 60, 30]
+    density = [1, 1/1.5, 1/2, 1/2.5, 1/3, 1/3.5, 1/4, 1/4.5, 1/5, 1/5.5]
+    fwhm = [50, 45, 40, 35, 30, 25, 20, 15, 10, 5]
+    bounds = [[45, 45], [30, 60], [20, 70], [10, 80], [5, 85]]
+    rmax = [120, 60, 30]
 
-    # create idcs to be used in filename
-    i_d = 1
-    i_t = 1
-    i_b = 1
-    i_f = 1
     # loop_conds[0] = i_d   loop_conds[1] = i_t   loop_conds[2] = t_2
+    d = [0, 6]  # sampling density of obliques
+    t = [0, 8]  # tuning width fwhm
+    b = [0]  # boundary
+    f = [0, 1]  # firing rate  (Shen et al., 2014)
 
-    d = [1, 3, 7]  # sampling density of obliques
-    t = [10]  # tuning width fwhm
-    b = [1]  # boundary
-    f = [2]  # firing rate  (Shen et al., 2014)
-
-    test = []
     counter = 0
     # get all possible combos of idcs for each paramater
     all_combos = [[d_, t_, b_, f_] for d_ in d for t_ in t for b_ in b for f_ in f]
-    for combo in all_combos:
-        i_d = combo[0]
-        i_t = combo[1]
-        i_b = combo[2]
-        i_f = combo[3]
+    for i_combo in all_combos:
+        i_d = i_combo[0]
+        i_t = i_combo[1]
+        i_b = i_combo[2]
+        i_f = i_combo[3]
 
-        cardinal = Params(sampling_density=density_1[0], sampling_range=bounds_1[i_b - 1][0], tuning_fwhm=fwhm_1[i_t - 1])
-        oblique = Params(sampling_density=density_1[i_d - 1], sampling_range=bounds_1[i_b - 1][1], tuning_fwhm=fwhm_1[0])
+        cardinal = Params(sampling_density=density[0], sampling_range=bounds[i_b][0], tuning_fwhm=fwhm[i_t])
+        oblique = Params(sampling_density=density[i_d], sampling_range=bounds[i_b][1], tuning_fwhm=fwhm[0])
 
-        shared = Params(r_max=rmax_1[i_f - 1], spont=0.05, exponent=3.4, semi_sat=14)
+        shared = Params(r_max=rmax[i_f - 1], spont=0.05, exponent=3.4, semi_sat=14)
 
-        contrasts = [2.5, 5, 10, 20, 40, 80]
-        n_runs = 30
-
-        filename = f"B{i_b}_D{i_d}_T{i_t}_F{i_f}_{len(contrasts)}cons_{n_runs}runs_semisat{shared.semi_sat}"
         og_path = os.getcwd()
         data_path = os.path.join(og_path, 'data')
         if not os.path.exists(data_path):
@@ -786,137 +779,148 @@ if __name__ == '__main__':
         # generate tunings & prefs for each pop
         PopCode.gen_tunings(stack=True, window=True)  # stack & calc rollingwindow of prefs
 
-        tic = time.time()
         # use multiprocessing for different decoding methods over nruns
         # define variables with which to iterate over for all possible combinations
 
-        decoder = ['WTA', 'PV', 'ML']
-        # define constants which will be iterated to match n_combinations (stepsize has huge influence on stair time)
-        Staircase = StaircaseHandler(start_level=20, step_sizes=[0.6, 0.3, 0.25, 0.2, 0.19, 0.18, 0.17, 0.16],
-                                     n_up=1, n_down=3, n_reversals=8, revs_per_thresh=5,
-                                     extra_info=ori_populations_info)
-        ori_std = [-45, 0, 45, 90]
-        n_runs = n_runs
-        contrast = contrasts
-
         # at low contrasts the PV and ML decoders fail due to integer scale of poisson noise
         # (may have affected prev staircase results)
-        mocs = True
-        ori_std = [-45, 0, 45, 90]
-        contrast = [0.625, 1.25, 2.5, 5, 10, 20, 40, 80]
-        min_level = 0
-        max_level = 20
-        n_levels = 21
-        n_level_reps = 1000
-        ori_offset = np.linspace(min_level, max_level, n_levels)  # ensure sensitive psychometric function
+        use_staircase = True
+        use_mocs = True
+        use_mp = True
+        use_single = False
+        use_loops = False
+        show_errors = False  # whether to print errors from inside functions
+
+        ori_std = [0, 45]
+        contrast = [2.5, 5, 10, 20, 40, 80]
         decoder = ['WTA', 'PV', 'ML']
-        if mocs:
-            # tic = time.time()
-            # summary_data = dict(decoder=[], std_ori=[], contrast=[], threshold=[], slope=[])
-            # for i_decoder in ['WTA', 'PV', 'ML']:
-            #     for i_std_ori in ori_std:
-            #         for i_contrast in contrast:
-            #             test = perform_oridis_2afc_mocs(PopCode, i_decoder, i_std_ori, i_contrast, ori_offset,
-            #                                             n_level_reps)
-                        # get all possible iterations / combinations of conditions for use in multiprocessing
-            tic = time.time()
-            mp_iters = {'popcode': [], 'decoder': [], 'ori_std': [], 'contrast': [], 'offsets': [], 'n_level_reps': []}
-            n_iters = len(decoder) * len(ori_std) * len(contrast)  # all IVs
-            for i_decoder in decoder:
-                for i_ori_std in ori_std:
-                    for i_contrast in contrast:
-                        # IVs
-                        mp_iters['decoder'].append(i_decoder)
-                        mp_iters['ori_std'].append(i_ori_std)
-                        mp_iters['contrast'].append(i_contrast)
-                        # constants
-                        mp_iters['popcode'].append(PopCode)
-                        mp_iters['offsets'].append(ori_offset)
-                        mp_iters['n_level_reps'].append(n_level_reps)
-            with mp.Pool() as pool:
-                mp_data = pool.starmap(perform_oridis_2afc_mocs,
-                                       zip(mp_iters['popcode'], mp_iters['decoder'],
-                                           mp_iters['ori_std'], mp_iters['contrast'],
-                                           mp_iters['offsets'], mp_iters['n_level_reps'])
-                                       )
-                pool.close()
-                pool.join()
+        filename = f"B{i_b}_D{i_d}_T{i_t}_F{i_f}_{len(contrast)}cons"
 
-            print(
-                f">>> mocs time taken =\n\t\t{(time.time() - tic):.2f} secs")
+        # # # METHOD OF CONSTANT STIMULI # # #
+        if use_mocs:
+            print('\n# # # RUNNING METHOD OF CONSTANT STIMULI # # #')
 
-            all_data = pd.concat([i.data for i in mp_data])
-            z = 1
-            #     mocs_data['ori_offset'].append(i_ori_offset)
-            #     mocs_data['contrast'].append(i_contrast)
-            #     mocs_data['proportion_correct'].append(proportion_correct)
-            # for i_ori_offset in ori_offset:
-            #     i_comp_ori = i_std_ori + i_ori_offset
-            #     # calculate proportion correct for each condition & offset
-            #     # get noisy_resp and decoded for each std and offsets for n_reps
-            #     std_decoded = PopCode.decode_response(i_decoder, i_std_ori, i_contrast, n_level_reps,
-            #                                           True)
-            #     comp_decoded = PopCode.decode_response(i_decoder, i_comp_ori, i_contrast, n_level_reps,
-            #                                            True)
-            #     isCW = comp_decoded > std_decoded  # oridis for each trial
-            #     proportion_correct = (1 / len(isCW)) * np.sum(isCW)
-            #     # print(f"{l_decoder}:  {proportion_correct:.4}")
-            #     # append vals into data_dict
-            #     mocs_data['decoder'].append(i_decoder)
-            #     mocs_data['std_ori'].append(i_std_ori)
-            #     mocs_data['ori_offset'].append(i_ori_offset)
-            #     mocs_data['contrast'].append(i_contrast)
-            #     mocs_data['proportion_correct'].append(proportion_correct)
-            # print(f"mocs took {time.time() - tic:.1f}s")
-            # mocs_data = pd.DataFrame(mocs_data)
-            # mocs_data.to_csv('test_mocs_data.csv')
-            # mocs_data.to_pickle('test_mocs_data.pkl')
-            # tic = time.time()
-            # mocs_summary_data = dict(decoder=[], std_ori=[], contrast=[], threshold=[])
-            # for i_decoder in mocs_data['decoder'].unique():
-            #     for i_std_ori in mocs_data['std_ori'].unique():
-            #         for i_contrast in mocs_data['contrast'].unique():
-            #             i_dframe = mocs_data[(mocs_data['decoder'] == i_decoder) &
-            #                                  (mocs_data['std_ori'] == i_std_ori) &
-            #                                  (mocs_data['contrast'] == i_contrast)]
-            #             i_curve_fit = fit_logistic(x_vals=ori_offset, y_vals=i_dframe['proportion_correct'])
-            #             print('')
-            # print(f"Curve fits took: {time.time() - tic}s")
-        debug = True
-        if debug:
-            print('...debug without multiprocessing\n')
-            ori_std = [-45, 0, 45, 90]
-            debug = perform_2afc_ori_contrast(Staircase, PopCode, 'WTA', ori_std, contrast)
-            print('...end')
-        else:
-            # get all possible iterations / combinations of conditions for use in multiprocessing
-            mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}
-            for _ in range(n_runs):
+            n_level_reps = 100
+            ori_offset = np.linspace(0, 90, 91)  # ensure sensitive psychometric function
+            mocs_dframe = None
+
+            if use_single:  # if just one run requested
+                tic = time.time()
+                mocs_dframe = perform_oridis_2afc_mocs(mocs_popcode=PopCode, mocs_decoder='WTA', mocs_ori_std=0,
+                                                       mocs_contrast=2.5, mocs_ori_offsets=ori_offset,
+                                                       mocs_n_reps=n_level_reps)
+                print(f"\nSingle trial for {len(ori_offset)} levels:"
+                      f"\n\t\t\t\t\t{time.time() - tic:.2f} seconds")
+
+            if use_mp:  # if multiprocessing requested
+                tic = time.time()
+                mp_iters = {'popcode': [], 'decoder': [], 'ori_std': [], 'contrast': [], 'offsets': [],
+                            'n_level_reps': []}
+                n_iters = len(decoder) * len(ori_std) * len(contrast)  # all IVs
                 for i_decoder in decoder:
-                    mp_iters['decoder'].append(i_decoder)
-                    mp_iters['ori_std'].append(ori_std)
-                    mp_iters['contrast'].append(contrast)
-                    mp_iters['popcode'].append(PopCode)
-                    mp_iters['staircase'].append(Staircase)
+                    for i_ori_std in ori_std:
+                        for i_contrast in contrast:
+                            # IVs
+                            mp_iters['decoder'].append(i_decoder)
+                            mp_iters['ori_std'].append(i_ori_std)
+                            mp_iters['contrast'].append(i_contrast)
+                            # constants
+                            mp_iters['popcode'].append(PopCode)
+                            mp_iters['offsets'].append(ori_offset)
+                            mp_iters['n_level_reps'].append(n_level_reps)
+                with mp.Pool() as pool:
+                    mocs_data = pool.starmap(perform_oridis_2afc_mocs,
+                                             zip(mp_iters['popcode'], mp_iters['decoder'],
+                                                 mp_iters['ori_std'], mp_iters['contrast'],
+                                                 mp_iters['offsets'], mp_iters['n_level_reps'])
+                                             )
+                    pool.close()
+                    pool.join()
 
-            # make sure n_iters is equal for all params to be used in function
-            # each decoder across all cond combos for n_runs
-            with mp.Pool() as pool:
-                mp_data = pool.starmap(perform_2afc_ori_contrast, zip(mp_iters['staircase'], mp_iters['popcode'],
-                                                                      mp_iters['decoder'], mp_iters['ori_std'],
-                                                                      mp_iters['contrast']))
-                pool.close()
-                pool.join()
+                print(f"\nMultiprocessing with {len(decoder) * len(contrast) * len(ori_std)} conds"
+                      f" for {len(ori_offset)} levels:"
+                      f"\n\t\t\t\t\t{time.time() - tic:.2f} seconds")
+                mocs_dframe = pd.concat([i for i in mocs_data])
+                mocs_dframe = mocs_dframe.sort_values(by=['decoder', 'ori_std', 'contrast'])
 
-            print(f">>> Condition complete: {filename}\n\t...time taken =\n\t\t{(time.time() - tic):.2f} secs")
+            if use_loops:  # if looping requested (no multiprocessing nor one-run requested)
+                tic = time.time()
+                mocs_data = []
+                for i_std in ori_std:
+                    for i_decoder in decoder:
+                        for i_contrast in contrast:
+                            mocs_data.append(perform_oridis_2afc_mocs(mocs_popcode=PopCode, mocs_decoder=i_decoder,
+                                                                      mocs_ori_std=i_std, mocs_contrast=i_contrast,
+                                                                      mocs_ori_offsets=ori_offset, mocs_n_reps=100)
+                                             )
+                mocs_dframe = pd.concat([i for i in mocs_data])
+                print(f"\nLooping through {len(decoder) * len(contrast) * len(ori_std)} conds"
+                      f" for {len(ori_offset)} levels:"
+                      f"\n\t\t\t\t\t{time.time() - tic:.2f} seconds")
 
-            all_data = pd.concat([i.data for i in mp_data])
-            all_data = all_data.sort_values(by=['decoder', 'ori', 'iv'])
+            # save out dframe for later analysis
+            mocs_output = dict(all_data=mocs_dframe, information=ori_populations_info)
+            with open(os.path.join(data_path, f"{filename}_mocs.pkl"), "wb") as file:
+                dill.dump(mocs_output, file)
 
-            output = dict(all_data=all_data, information=ori_populations_info)
+        # # # STAIRCASE # # #
+        if use_staircase:
+            print('\n# # # RUNNING STAIRCASE # # #')
+            # define constants which will be iterated to match n_combos (stepsize has huge influence on stair time)
+            n_runs = 5
+            Staircase = StaircaseHandler(start_level=20, step_sizes=[0.6, 0.3, 0.25, 0.2, 0.19, 0.18, 0.17, 0.16],
+                                         n_up=1, n_down=3, n_reversals=8, revs_per_thresh=5,
+                                         extra_info=ori_populations_info)
+            if use_single:
+                tic = time.time()
+                stair_dframe = perform_oridis_2afc_staircase(Staircase, PopCode, 'WTA', [0], [80])
+                print(f"\nSingle run:"
+                      f"\n\t\t\t\t\t{time.time() - tic:.2f} seconds")
 
-            with open(os.path.join(data_path, f"{filename}.pkl"), "wb") as file:
-                pickle.dump(output, file)
+            if use_mp:
+                tic = time.time()
+                # get all possible iterations / combinations of conditions for use in multiprocessing
+                mp_iters = {'decoder': [], 'ori_std': [], 'contrast': [], 'popcode': [], 'staircase': []}
+                for _ in range(n_runs):
+                    for i_decoder in decoder:
+                        mp_iters['decoder'].append(i_decoder)
+                        mp_iters['ori_std'].append(ori_std)
+                        mp_iters['contrast'].append(contrast)
+                        mp_iters['popcode'].append(PopCode)
+                        mp_iters['staircase'].append(Staircase)
+                # make sure n_iters is equal for all params to be used in function
+                # each decoder across all cond combos for n_runs
+                with mp.Pool() as pool:
+                    stair_data = pool.starmap(perform_oridis_2afc_staircase,
+                                              zip(mp_iters['staircase'], mp_iters['popcode'],
+                                                  mp_iters['decoder'], mp_iters['ori_std'],
+                                                  mp_iters['contrast']))
+                    pool.close()
+                    pool.join()
 
-            counter += 1
-            print(f"{counter} down, {36 - counter} to go!")
+                stair_dframe = pd.concat([i.data for i in stair_data])
+
+                print(f"\nMultiprocessing with {len(decoder) * len(contrast) * len(ori_std)} conds"
+                      f" for {n_runs} runs:"
+                      f"\n\t\t\t\t\t{time.time() - tic:.2f} seconds")
+
+                # save out dframe for later analysis
+                stair_dframe = stair_dframe.sort_values(by=['decoder', 'ori_std', 'contrast'])
+                stair_output = dict(all_data=stair_dframe, information=ori_populations_info)
+                with open(os.path.join(data_path, f"{filename}_staircase.pkl"), "wb") as file:
+                    dill.dump(stair_output, file)
+
+            if use_loops:
+                tic = time.time()
+                stair_data = []
+                for _ in range(n_runs):
+                    for i_decoder in decoder:
+                        stair_data.append(perform_oridis_2afc_staircase(Staircase, PopCode, i_decoder, ori_std, contrast)
+                                          )
+                print(f"\nLooping through {len(decoder) * len(contrast) * len(ori_std)} conds"
+                      f" for {n_runs} runs:"
+                      f"\n\t\t\t\t\t{time.time() - tic:.2f} seconds")
+
+        z = 1
+
+    z = 1
